@@ -27,10 +27,13 @@ console = Console()
 load_dotenv()  # Ensure this is called before accessing environment variables
 
 # Set up OpenAI client securely using environment variables
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key="YOUR KEY")
 
 # Set the model as a variable at the top of the script
-MODEL = "o1-mini"
+MainModel = "o1-mini"
+EditorModel = "o1-mini"
+PlanningModel = "o1-preview"
+
 
 # Planning prompt
 planningprompt = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough. Here's the user's request:"""
@@ -72,7 +75,7 @@ src/utils/helper.py:
 # Editor prompt for direct file updates
 def get_formatted_editor_prompt(files_to_edit):
     file_list = '\n'.join([f"- {Path(f).name}" for f in files_to_edit])
-    return f"""You are required to provide the complete updated content for the specified files based on the user's request.
+    return f"""You are required to provide specific edits for the specified files based on the user's request.
 
 **Guidelines:**
 
@@ -83,34 +86,31 @@ def get_formatted_editor_prompt(files_to_edit):
 
 3. **YAML Structure:**
     - **Keys:** The YAML object should have **filenames** as keys. Only include filenames from the provided list.
-    - **Values:** Each filename maps to a string containing the full updated content of the file.
+    - **Values:** Each filename maps to a list of edit instructions.
 
-4. **Edit Instructions:**
-    - Provide the **complete content** of each file after applying the requested fixes or improvements.
-    - Ensure that the content is **syntax-error-free** and **fully functional**.
-    - **Do not include** any explanations, comments, or any other text outside the `<tags>` block.
+4. **Edit Instruction Format:**
+    - Each edit instruction should be an object with the following keys:
+        - `operation`: The type of edit (`replace`, `insert`, `delete`).
+        - `pattern`: The text or regex pattern to search for.
+        - `replacement` (optional): The text to replace the pattern with (required for `replace` and `insert`).
 
 5. **Example:**
 
 <tags>
-snake.py: |
-  import sys
-  import random
-  import pygame
-  
-  # Initialize power-ups
-  power_up = None
-  
-  pygame.init()
-  screen = pygame.display.set_mode((800, 600))
-  pygame.display.set_caption('Snake Game')
-  
-  # Additional improvements and fixes here
+snake.py:
+  - operation: replace
+    pattern: 'import random'
+    replacement: 'import numpy as np'
+  - operation: insert
+    pattern: '# Initialize power-ups'
+    replacement: '# Initialize power-ups\\ninitialize_power_ups()'
+  - operation: delete
+    pattern: 'power_up = None'
 </tags>
 
 6. **No Additional Text:** Do not include any explanations, comments, or any other text outside the `<tags>` block.
 
-7. **Remember:** Only use this format when explicitly asked to provide the complete updated content for the available files.
+7. **Remember:** Only use this format when explicitly asked to provide specific edits for the available files.
 
 **Important:** Failure to follow these guidelines will result in parsing errors. Be precise and strictly adhere to the format.
 """
@@ -298,24 +298,24 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
     Generates unified diffs between original and updated file contents.
 
     Args:
-        ai_response (str): The AI's YAML response with updated file contents.
+        ai_response (str): The AI's YAML response with edit instructions.
         files_to_edit (List[str]): List of file paths to edit.
 
     Returns:
         str: The formatted diffs for all files.
     """
     yaml_content = extract_yaml_blocks(ai_response)
-    updated_contents = yaml.safe_load(yaml_content)
+    edit_instructions = yaml.safe_load(yaml_content)
     diffs = ""
 
     for file_path in files_to_edit:
         filename = Path(file_path).name
-        if filename not in updated_contents:
-            console.print(f"[red]No updated content found for {filename}.[/red]")
-            logging.error(f"No updated content found for {filename}.")
+        if filename not in edit_instructions:
+            console.print(f"[red]No edit instructions found for {filename}.[/red]")
+            logging.error(f"No edit instructions found for {filename}.")
             continue
 
-        updated_content = updated_contents[filename]
+        instructions = edit_instructions[filename]
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 original_content = f.read()
@@ -324,28 +324,42 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
             logging.error(f"Failed to read original content of {file_path}: {str(e)}")
             continue
 
+        # Apply edits to get the updated content
+        updated_content = apply_edits_to_content(original_content, instructions)
+
+        # Compute the diff between original and updated content
         diff = compute_diff(original_content, updated_content, filename)
         diffs += diff + "\n"
 
     return diffs
 
 def display_ai_response(response):
-    # Check if the response contains YAML within <tags></tags>
     yaml_content = extract_yaml_blocks(response)
 
     if yaml_content:
-        # If YAML content is present, parse and display the updated file contents using Rich's Markdown for better readability
         try:
             parsed_yaml = yaml.safe_load(yaml_content)
-            for filename, content in parsed_yaml.items():
-                console.print(f"\n[bold blue]Updated Content for {filename}:[/bold blue]")
-                code_block = f"```python\n{content}\n```"
-                console.print(Markdown(code_block))
+            # Determine if the response is for file creation or editing
+            if all(isinstance(value, dict) and 'code' in value for value in parsed_yaml.values()):
+                # File creation response
+                for filename, file_info in parsed_yaml.items():
+                    console.print(f"\n[bold blue]Content for {filename}:[/bold blue]")
+                    code = decode_code_field(file_info['code'], filename)
+                    code_block = f"```{file_info['extension']}\n{code}\n```"
+                    console.print(Markdown(code_block))
+            else:
+                # File editing response
+                for filename, instructions in parsed_yaml.items():
+                    console.print(f"\n[bold blue]Edit Instructions for {filename}:[/bold blue]")
+                    for instr in instructions:
+                        console.print(f"- Operation: {instr.get('operation')}")
+                        console.print(f"  Pattern: {instr.get('pattern')}")
+                        if 'replacement' in instr:
+                            console.print(f"  Replacement: {instr.get('replacement')}")
         except yaml.YAMLError as e:
             console.print(f"[red]Error parsing YAML content: {str(e)}[/red]")
             logging.error(f"Error parsing YAML content: {str(e)}")
     else:
-        # If no YAML content, render the entire response as Markdown
         console.print(Markdown(response))
 
 def get_planning_response(planning_request):
@@ -358,9 +372,9 @@ def get_planning_response(planning_request):
 
     try:
         response = client.chat.completions.create(
-            model=MODEL,
+            model=PlanningModel,
             messages=planning_messages,
-            max_completion_tokens=65536
+            max_completion_tokens=30000
         )
 
         stop_event.set()
@@ -465,7 +479,7 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
 
         try:
             response = client.chat.completions.create(
-                model=MODEL,
+                model=EditorModel,
                 messages=edit_messages,
                 max_completion_tokens=65536
             )
@@ -540,12 +554,16 @@ def is_valid_yaml_content_response(response_text):
     if not isinstance(parsed_yaml, dict):
         return False, "Parsed YAML is not a dictionary."
 
-    for filename, content in parsed_yaml.items():
-        if not isinstance(content, str):
-            return False, f"Content for {filename} is not a string."
-        if not content.strip():
-            return False, f"Content for {filename} is empty."
-
+    for filename, instructions in parsed_yaml.items():
+        if not isinstance(instructions, list):
+            return False, f"Instructions for {filename} are not a list."
+        for instr in instructions:
+            if not isinstance(instr, dict):
+                return False, f"An instruction in {filename} is not a dictionary."
+            if 'operation' not in instr or 'pattern' not in instr:
+                return False, f"Missing keys in an instruction for {filename}."
+            if instr['operation'] in ['replace', 'insert'] and 'replacement' not in instr:
+                return False, f"Missing 'replacement' for operation '{instr['operation']}' in {filename}."
     return True, "Valid YAML content response."
 
 def clean_diff(diff: str) -> str:
@@ -565,23 +583,65 @@ def clean_diff(diff: str) -> str:
         cleaned_lines.append(line)
     return '\n'.join(cleaned_lines)
 
+import re
+
+def apply_edits_to_content(content: str, instructions: list) -> str:
+    for instr in instructions:
+        operation = instr.get('operation')
+        pattern = instr.get('pattern')
+        replacement = instr.get('replacement', '')
+
+        if operation == 'replace':
+            content = re.sub(pattern, replacement, content)
+        elif operation == 'insert':
+            content = re.sub(pattern, f"{pattern}{replacement}", content)
+        elif operation == 'delete':
+            content = re.sub(pattern, '', content)
+        else:
+            console.print(f"[red]Unknown operation '{operation}' in instructions.[/red]")
+    return content
+
+
+def apply_edit_instructions(file_path: Path, instructions: list):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Apply edits to get the updated content
+        updated_content = apply_edits_to_content(content, instructions)
+
+        # Backup the original file
+        backup_file(file_path)
+
+        # Write the updated content to the file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(updated_content)
+
+        console.print(f"[green]Successfully applied edits to {file_path}.[/green]")
+        logging.info(f"Successfully applied edits to {file_path}.")
+
+    except Exception as e:
+        console.print(f"[red]Failed to apply edits to {file_path}: {str(e)}[/red]")
+        logging.error(f"Failed to apply edits to {file_path}: {str(e)}")
+
+
 def apply_file_updates(ai_response, conversation_history, files_to_edit):
     """
-    Parses the AI's updated file contents and applies them to the specified files.
+    Parses the AI's edit instructions and applies them to the specified files.
 
     Args:
-        ai_response (str): The AI's YAML response with updated file contents.
+        ai_response (str): The AI's YAML response with edit instructions.
         conversation_history (list): The current conversation history.
         files_to_edit (list): List of file paths to edit.
     """
     try:
         yaml_content = extract_yaml_blocks(ai_response)
-        content_instructions = yaml.safe_load(yaml_content)
+        edit_instructions = yaml.safe_load(yaml_content)
 
         # Map filenames to their full paths
         filename_to_path = {Path(f).name: Path(f) for f in files_to_edit}
 
-        for filename, new_content in content_instructions.items():
+        for filename, instructions in edit_instructions.items():
             if filename not in filename_to_path:
                 console.print(f"[red]Filename '{filename}' is not in the list of files to edit. Skipping.[/red]")
                 logging.error(f"Filename '{filename}' is not in the list of files to edit.")
@@ -594,20 +654,7 @@ def apply_file_updates(ai_response, conversation_history, files_to_edit):
                 logging.error(f"File not found for editing: {file_path}")
                 continue
 
-            try:
-                # Backup the original file before making changes
-                backup_path = backup_file(file_path)
-
-                # Write the new content to the file
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(new_content)
-
-                console.print(f"[green]Successfully updated {file_path}.[/green]")
-                logging.info(f"Successfully updated {file_path}.")
-
-            except Exception as e:
-                console.print(f"[red]Failed to update {file_path}: {str(e)}[/red]")
-                logging.error(f"Failed to update {file_path}: {str(e)}")
+            apply_edit_instructions(file_path, instructions)
 
         # Optionally, add confirmation to conversation history
         conversation_history.append({"role": "assistant", "content": "Edits have been applied successfully."})
@@ -649,7 +696,21 @@ def prompt_user_confirmation():
             console.print("[red]Please respond with 'yes' or 'no'.[/red]")
 
 def chat_with_ai():
-    console.print("o1-mini-engineer is ready (type 'exit' to quit, 'reset' to clear conversation, '/add file1 [file2 ...]' to add files, '/edit file1 [file2 ...]' to edit files, 'save' to save conversation, or 'planning' to use the planning feature).", style="bold green")
+    from rich.table import Table
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Command", style="cyan", no_wrap=True)
+    table.add_column("Description", style="dim")
+
+    table.add_row("exit", "Quit the program")
+    table.add_row("reset", "Clear conversation history")
+    table.add_row("/add file1 [file2 ...]", "Add files to the conversation")
+    table.add_row("/edit file1 [file2 ...]", "Edit specified files")
+    table.add_row("save", "Save the conversation")
+    table.add_row("planning", "Use the planning feature")
+
+    console.print(table)
+    console.print("o1-mini-engineer is ready. Please enter a command or start your conversation.", style="bold green")
     conversation_history = []
     
     # Initialize state variables
@@ -684,7 +745,7 @@ def chat_with_ai():
 
                 try:
                     response = client.chat.completions.create(
-                        model=MODEL,
+                        model=MainModel,
                         messages=conversation_history,
                         max_completion_tokens=65536  # Adjust as needed
                     )
@@ -751,7 +812,6 @@ def chat_with_ai():
             save_conversation(conversation_history)
             continue
         elif command in ['add', 'edit']:
-            # Handle add or edit command with args (list of file paths)
             parse_add_or_edit_command(command, args, conversation_history)
             if command == 'edit':
                 prompt_edit_instructions()
@@ -770,7 +830,7 @@ def chat_with_ai():
             current_plan = planning_response
             continue
 
-        # Handle normal user input
+        # Handle normal user input (file creation)
         if command is None:
             full_input = f"{preprompt}\n\nUser: {user_input}"
             conversation_history.append({"role": "user", "content": full_input})
@@ -781,7 +841,7 @@ def chat_with_ai():
 
             try:
                 response = client.chat.completions.create(
-                    model=MODEL,
+                    model=MainModel,
                     messages=conversation_history,
                     max_completion_tokens=65536  # Default max for o1-mini
                 )
