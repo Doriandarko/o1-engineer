@@ -1,7 +1,7 @@
-# o1-mini-engineer
+# o1-engineer
 
 ## Overview
-o1-mini-engineer is a command-line tool designed to assist developers in managing and interacting with their projects efficiently. Leveraging the power of OpenAI's API, this tool provides functionalities such as code generation, file editing, and project planning to streamline your development workflow.
+o1-engineer is a command-line tool designed to assist developers in managing and interacting with their projects efficiently. Leveraging the power of OpenAI's API, this tool provides functionalities such as code generation, file editing, and project planning to streamline your development workflow.
 
 ## Features
 - **Automated Code Generation**: Generate boilerplate code for your projects effortlessly.
