@@ -8,13 +8,12 @@ o1-mini-engineer is a command-line tool designed to assist developers in managin
 - **File Management**: Add, edit, and manage project files directly from the command line.
 - **Project Planning**: Create detailed plans based on your project requirements.
 - **Interactive Console**: User-friendly interface with rich text support for enhanced readability.
-- **Logging and Debugging**: Comprehensive logging to monitor and debug operations.
 
 ## Installation
 
 ### Prerequisites
 - **Python**: Ensure you have Python 3.7 or higher installed. [Download Python](https://www.python.org/downloads/)
-- **OpenAI API Key**: Obtain an API key from [OpenAI](https://platform.openai.com/account/api-keys).
+- **OpenAI API Key**: Obtain an API key from [OpenAI](https://platform.openai.com/).
 
 ### Steps
 1. **Clone the Repository**:
@@ -72,11 +71,6 @@ We welcome contributions! Please follow these steps:
 4. Push to the branch (`git push origin feature/YourFeature`).
 5. Open a pull request.
 
-## License
-This project is licensed under the [MIT License](LICENSE).
-
-## Contact
-For any inquiries or questions, please contact [your.email@example.com](mailto:your.email@example.com).
 
 ## Acknowledgments
 - OpenAI for providing the powerful API.
