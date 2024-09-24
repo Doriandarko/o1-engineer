@@ -27,12 +27,20 @@ console = Console()
 load_dotenv()  # Ensure this is called before accessing environment variables
 
 # Set up OpenAI client securely using environment variables
-client = OpenAI(api_key="YOUR KEY")
+client = OpenAI(api_key="YOUR API KEY")
 
 # Set the model as a variable at the top of the script
 MainModel = "o1-mini"
-EditorModel = "o1-mini"
+EditorModel = "o1-preview"
 PlanningModel = "o1-preview"
+
+# Initialize total cost variables
+total_input_cost = 0.0
+total_output_cost = 0.0
+total_chat_cost = 0.0
+
+# Define the maximum number of messages to keep in conversation history, the more messages the higher the cost
+MAX_CONVERSATION_HISTORY = 10
 
 
 # Planning prompt
@@ -204,33 +212,31 @@ def parse_and_create_files(ai_response):
     yaml_content = extract_yaml_blocks(ai_response)
 
     if not yaml_content:
-        # If no YAML content, it's likely a regular text response
-        logging.info("No YAML content found. This appears to be a regular text response.")
+        # logging.warning("No YAML content found in AI response.")
         return created_files
 
     try:
         parsed_yaml = yaml.safe_load(yaml_content)
     except yaml.YAMLError as e:
-        console.print(f"[yellow]YAML parsing error: {str(e)}. This might be a regular text response.[/yellow]")
-        logging.warning(f"YAML parsing error: {str(e)}. This might be a regular text response.")
+        console.print(f"[red]YAML parsing error: {str(e)}[/red]")
+        logging.error(f"YAML parsing error: {str(e)}")
         return created_files
 
     if not isinstance(parsed_yaml, dict):
-        logging.info("Parsed content is not a dictionary. This appears to be a regular text response.")
+        logging.error("Parsed YAML is not a dictionary.")
         return created_files
 
     for filename, file_info in parsed_yaml.items():
         if not isinstance(file_info, dict):
-            logging.warning(f"File info for {filename} is not a dictionary. Skipping. Data: {file_info}")
+            logging.warning(f"File info for {filename} is not a dictionary. Skipping.")
             continue
 
         if not all(k in file_info for k in ("extension", "code")):
-            logging.warning(f"Missing keys in file info for {filename}. Skipping. Data: {file_info}")
+            logging.warning(f"Missing keys in file info for {filename}. Skipping.")
             continue
 
         try:
-            code = file_info['code']
-            code = decode_code_field(code, filename)
+            code = decode_code_field(file_info['code'], filename)
             file_path = script_dir / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(code, encoding='utf-8')
@@ -264,11 +270,24 @@ def animate_thinking(stop_event):
         sys.stdout.flush()
         time.sleep(0.1)
 
-def calculate_cost(prompt_tokens, completion_tokens):
-    input_cost = (prompt_tokens / 1_000_000) * 3
-    output_cost = (completion_tokens / 1_000_000) * 12
+def calculate_cost(prompt_tokens, completion_tokens, model):
+    model_costs = {
+        "o1-mini": {"input": 3.0, "output": 12.0},
+        "o1-preview": {"input": 15.0, "output": 60.0},
+        # Add more models and their costs here if needed
+    }
+    if model not in model_costs:
+        input_cost_per_million = 0
+        output_cost_per_million = 0
+    else:
+        input_cost_per_million = model_costs[model]["input"]
+        output_cost_per_million = model_costs[model]["output"]
+
+    input_cost = (prompt_tokens / 1_000_000) * input_cost_per_million
+    output_cost = (completion_tokens / 1_000_000) * output_cost_per_million
     total_cost = input_cost + output_cost
     return input_cost, output_cost, total_cost
+
 
 def compute_diff(original_content: str, updated_content: str, filename: str) -> str:
     """
@@ -363,6 +382,8 @@ def display_ai_response(response):
         console.print(Markdown(response))
 
 def get_planning_response(planning_request):
+    global total_input_cost, total_output_cost, total_chat_cost
+
     planning_prompt = f"{planningprompt} {planning_request}"
     planning_messages = [{"role": "user", "content": planning_prompt}]
 
@@ -374,7 +395,7 @@ def get_planning_response(planning_request):
         response = client.chat.completions.create(
             model=PlanningModel,
             messages=planning_messages,
-            max_completion_tokens=30000
+            max_completion_tokens=32768
         )
 
         stop_event.set()
@@ -391,10 +412,17 @@ def get_planning_response(planning_request):
                       f"Completion: {usage.completion_tokens}, "
                       f"Total: {usage.total_tokens}[/cyan]")
 
-        input_cost, output_cost, total_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+        input_cost, output_cost, message_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens, PlanningModel)
+
+        # Accumulate costs
+        total_input_cost += input_cost
+        total_output_cost += output_cost
+        total_chat_cost += message_cost
+
         console.print(f"[cyan]Planning Cost: Input: ${input_cost:.4f}, "
                       f"Output: ${output_cost:.4f}, "
-                      f"Total: ${total_cost:.4f}[/cyan]")
+                      f"Total: ${message_cost:.4f}[/cyan]")
+        console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
         return planning_response
 
@@ -454,6 +482,8 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
         conversation_history (list): The current conversation history.
         files_to_edit (list): List of filenames to edit.
     """
+    global total_input_cost, total_output_cost, total_chat_cost
+
     # Get the formatted editor prompt with the file list
     formatted_editor_prompt = get_formatted_editor_prompt(files_to_edit)
 
@@ -481,7 +511,7 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
             response = client.chat.completions.create(
                 model=EditorModel,
                 messages=edit_messages,
-                max_completion_tokens=65536
+                max_completion_tokens=32768
             )
 
             # Log the raw AI response
@@ -506,10 +536,17 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
                               f"Completion: {usage.completion_tokens}, "
                               f"Total: {usage.total_tokens}[/cyan]")
 
-                input_cost, output_cost, total_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+                input_cost, output_cost, message_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens, EditorModel)
+
+                # Accumulate costs
+                total_input_cost += input_cost
+                total_output_cost += output_cost
+                total_chat_cost += message_cost
+
                 console.print(f"[cyan]Edit Cost: Input: ${input_cost:.4f}, "
                               f"Output: ${output_cost:.4f}, "
-                              f"Total: ${total_cost:.4f}[/cyan]")
+                              f"Total: ${message_cost:.4f}[/cyan]")
+                console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
                 # Compute diffs and display them
                 diffs = generate_diffs(edit_response, files_to_edit)
@@ -654,14 +691,23 @@ def apply_file_updates(ai_response, conversation_history, files_to_edit):
                 logging.error(f"File not found for editing: {file_path}")
                 continue
 
+            logging.debug(f"Applying edits to file: {file_path}")
+            logging.debug(f"Edit instructions: {instructions}")
+
             apply_edit_instructions(file_path, instructions)
 
-        # Optionally, add confirmation to conversation history
-        conversation_history.append({"role": "assistant", "content": "Edits have been applied successfully."})
+            logging.debug(f"Edits applied to file: {file_path}")
+
+        # Add confirmation to conversation history
+        confirmation_message = "Edits have been applied successfully."
+        conversation_history.append({"role": "assistant", "content": confirmation_message})
+        logging.info(confirmation_message)
 
     except Exception as e:
-        console.print(f"[red]An unexpected error occurred while applying edits: {str(e)}[/red]")
-        logging.error(f"An unexpected error occurred while applying edits: {str(e)}")
+        error_message = f"An unexpected error occurred while applying edits: {str(e)}"
+        console.print(f"[red]{error_message}[/red]")
+        logging.error(error_message)
+        logging.exception("Detailed traceback:")
 
 def backup_file(file_path: Path):
     """
@@ -679,23 +725,25 @@ def backup_file(file_path: Path):
     console.print(f"[yellow]Backup created for {file_path} at {backup_path}.[/yellow]")
     return backup_path
 
+
 def prompt_user_confirmation():
     """
     Prompts the user to confirm whether to apply the edits.
-
-    Returns:
-        bool: True if the user confirms, False otherwise.
     """
     while True:
         confirmation = input("\nDo you want to apply these edits? (yes/no): ").strip().lower()
         if confirmation in ['yes', 'y']:
+            logging.info("User confirmed to apply edits.")
             return True
         elif confirmation in ['no', 'n']:
+            logging.info("User declined to apply edits.")
             return False
         else:
             console.print("[red]Please respond with 'yes' or 'no'.[/red]")
 
 def chat_with_ai():
+    global total_input_cost, total_output_cost, total_chat_cost
+
     from rich.table import Table
 
     table = Table(show_header=True, header_style="bold magenta")
@@ -710,7 +758,7 @@ def chat_with_ai():
     table.add_row("planning", "Use the planning feature")
 
     console.print(table)
-    console.print("o1-mini-engineer is ready. Please enter a command or start your conversation.", style="bold green")
+    console.print("o1-engineer is ready. Please enter a command or start your conversation.", style="bold green")
     conversation_history = []
     
     # Initialize state variables
@@ -736,7 +784,7 @@ def chat_with_ai():
             if use_plan in ['yes', 'y']:
                 # Prepend the YAML preprompt to the current plan
                 full_input = f"{preprompt}\n\nUser: {current_plan}"
-                conversation_history.append({"role": "user", "content": full_input})
+                conversation_history = conversation_history[-MAX_CONVERSATION_HISTORY:]
 
                 # Send the updated conversation history to the AI
                 stop_event = threading.Event()
@@ -747,7 +795,7 @@ def chat_with_ai():
                     response = client.chat.completions.create(
                         model=MainModel,
                         messages=conversation_history,
-                        max_completion_tokens=65536  # Adjust as needed
+                        max_completion_tokens=32768  # Adjust as needed
                     )
 
                     # Log the raw AI response
@@ -767,7 +815,7 @@ def chat_with_ai():
                     if created_files:
                         console.print(f"[green]Created files: {', '.join(created_files)}[/green]")
 
-                    conversation_history.append({"role": "assistant", "content": ai_response})
+                    conversation_history = conversation_history[-MAX_CONVERSATION_HISTORY:]
 
                     usage = response.usage
                     reasoning_tokens = usage.completion_tokens_details.reasoning_tokens if hasattr(usage, 'completion_tokens_details') else "N/A"
@@ -776,10 +824,17 @@ def chat_with_ai():
                                   f"[magenta]Reasoning: {reasoning_tokens}[/magenta], "
                                   f"Total: {usage.total_tokens}[/cyan]")
 
-                    input_cost, output_cost, total_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+                    input_cost, output_cost, message_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens, MainModel)
+
+                    # Accumulate costs
+                    total_input_cost += input_cost
+                    total_output_cost += output_cost
+                    total_chat_cost += message_cost
+
                     console.print(f"[cyan]Cost: Input: ${input_cost:.4f}, "
                                   f"Output: ${output_cost:.4f}, "
-                                  f"Total: ${total_cost:.4f}[/cyan]")
+                                  f"Total: ${message_cost:.4f}[/cyan]")
+                    console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
                     if response.choices[0].finish_reason == 'length':
                         console.print("[yellow]Warning: The response was cut off due to token limit. "
@@ -803,6 +858,9 @@ def chat_with_ai():
         command, args = parse_command(user_input)
 
         if command == 'exit':
+            console.print(f"\n[bold green]Total Chat Cost: Input: ${total_input_cost:.4f}, "
+                          f"Output: ${total_output_cost:.4f}, "
+                          f"Total: ${total_chat_cost:.4f}[/bold green]")
             break
         elif command == 'reset':
             conversation_history.clear()
@@ -843,7 +901,7 @@ def chat_with_ai():
                 response = client.chat.completions.create(
                     model=MainModel,
                     messages=conversation_history,
-                    max_completion_tokens=65536  # Default max for o1-mini
+                    max_completion_tokens=32768  # Default max for o1-mini
                 )
 
                 # Log the raw AI response
@@ -872,10 +930,17 @@ def chat_with_ai():
                               f"[magenta]Reasoning: {reasoning_tokens}[/magenta], "
                               f"Total: {usage.total_tokens}[/cyan]")
 
-                input_cost, output_cost, total_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens)
+                input_cost, output_cost, message_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens, MainModel)
+
+                # Accumulate costs
+                total_input_cost += input_cost
+                total_output_cost += output_cost
+                total_chat_cost += message_cost
+
                 console.print(f"[cyan]Cost: Input: ${input_cost:.4f}, "
                               f"Output: ${output_cost:.4f}, "
-                              f"Total: ${total_cost:.4f}[/cyan]")
+                              f"Total: ${message_cost:.4f}[/cyan]")
+                console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
                 if response.choices[0].finish_reason == 'length':
                     console.print("[yellow]Warning: The response was cut off due to token limit. "
@@ -884,6 +949,11 @@ def chat_with_ai():
             except Exception as e:
                 stop_event.set()
                 console.print(f"[red]An error occurred: {str(e)}[/red]")
+
+    # After the while loop ends
+    console.print(f"\n[bold green]Total Chat Cost: Input: ${total_input_cost:.4f}, "
+                  f"Output: ${total_output_cost:.4f}, "
+                  f"Total: ${total_chat_cost:.4f}[/bold green]")
 
 if __name__ == "__main__":
     chat_with_ai()
