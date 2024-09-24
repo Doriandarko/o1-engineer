@@ -20,6 +20,13 @@ import shutil
 import difflib
 
 
+def load_yaml(yaml_content):
+    try:
+        return yaml.load(yaml_content, Loader=yaml.FullLoader)
+    except yaml.YAMLError as e:
+        raise e
+
+
 # Initialize Rich console
 console = Console()
 
@@ -27,11 +34,11 @@ console = Console()
 load_dotenv()  # Ensure this is called before accessing environment variables
 
 # Set up OpenAI client securely using environment variables
-client = OpenAI(api_key="YOUR API KEY")
+client = OpenAI(api_key="YOUR KEY")
 
 # Set the model as a variable at the top of the script
 MainModel = "o1-mini"
-EditorModel = "o1-preview"
+EditorModel = "o1-mini"
 PlanningModel = "o1-preview"
 
 # Initialize total cost variables
@@ -90,37 +97,48 @@ def get_formatted_editor_prompt(files_to_edit):
 1. **Available Files:** The following files are available for editing:
 {file_list}
 
-2. **Response Format:** Return your response **only** as a YAML object enclosed within `<tags>` and `</tags>`. **Do not include any text** before or after the `<tags>` block.
+2. **Important Notes:**
+   - **Copy Exact Code for `<find>`:** When creating the `<find>` code snippets, **copy the exact code from the files provided**.
+   - **Use Correct Tagging:** Ensure that you wrap the code snippets with the appropriate tags:
+     - `<find></find>` for the code to find.
+     - `<replace></replace>` for the code to replace.
+   - **Ensure Proper YAML Formatting:** Pay attention to indentation and special characters to produce valid YAML. Wrap code blocks using `|` and indent appropriately.
 
-3. **YAML Structure:**
-    - **Keys:** The YAML object should have **filenames** as keys. Only include filenames from the provided list.
-    - **Values:** Each filename maps to a list of edit instructions.
+3. **Response Format:** Return your response **only** as a YAML object enclosed within `<tags>` and `</tags>`. Do not include any text before or after the YAML content.
 
-4. **Edit Instruction Format:**
-    - Each edit instruction should be an object with the following keys:
-        - `operation`: The type of edit (`replace`, `insert`, `delete`).
-        - `pattern`: The text or regex pattern to search for.
-        - `replacement` (optional): The text to replace the pattern with (required for `replace` and `insert`).
+4. **YAML Structure:**
+   - **Keys:** The YAML object should have **filenames** as keys.
+   - **Values:** Each filename maps to a list of edits.
+   - **Each Edit:** Should be an object with two keys:
+     - `find`: The exact code snippet to find, enclosed within `<find></find>` tags.
+     - `replace`: The code snippet to replace it with, enclosed within `<replace></replace>` tags.
 
-5. **Example:**
+5. **Code Snippets:**
+   - **Maintain Formatting:** Preserve the original formatting, including indentation and line breaks.
+   - **Escape Special Characters:** If the code contains special YAML characters (like `:`, `-`, `?`, etc.), wrap the entire code block in double quotes (`"`), or use the YAML block scalar indicator `|` properly.
+   - **Use Block Scalars:** Utilize `|` for multiline strings to maintain formatting.
+   - **Example**:
 
 <tags>
-snake.py:
-  - operation: replace
-    pattern: 'import random'
-    replacement: 'import numpy as np'
-  - operation: insert
-    pattern: '# Initialize power-ups'
-    replacement: '# Initialize power-ups\\ninitialize_power_ups()'
-  - operation: delete
-    pattern: 'power_up = None'
+example.py:
+  - find: |
+      <find>
+      def old_function():
+          pass
+      </find>
+    replace: |
+      <replace>
+      def new_function():
+          # New implementation
+          pass
+      </replace>
 </tags>
 
 6. **No Additional Text:** Do not include any explanations, comments, or any other text outside the `<tags>` block.
 
 7. **Remember:** Only use this format when explicitly asked to provide specific edits for the available files.
 
-**Important:** Failure to follow these guidelines will result in parsing errors. Be precise and strictly adhere to the format.
+**Important:** Be precise and strictly adhere to the format, including proper tagging, indentation, and escaping.
 """
 
 # Prompt toolkit style
@@ -216,7 +234,7 @@ def parse_and_create_files(ai_response):
         return created_files
 
     try:
-        parsed_yaml = yaml.safe_load(yaml_content)
+        parsed_yaml = load_yaml(yaml_content)
     except yaml.YAMLError as e:
         console.print(f"[red]YAML parsing error: {str(e)}[/red]")
         logging.error(f"YAML parsing error: {str(e)}")
@@ -250,7 +268,7 @@ def parse_and_create_files(ai_response):
 
 def extract_yaml_blocks(response_text):
     """
-    Extracts YAML content enclosed within <tags></tags> from the response text.
+    Extracts YAML content enclosed within <tags> and </tags> from the response text.
 
     Args:
         response_text (str): The AI's response containing YAML.
@@ -258,9 +276,16 @@ def extract_yaml_blocks(response_text):
     Returns:
         str: The extracted YAML content or None if not found.
     """
-    match = re.search(r'<tags>\s*([\s\S]*?)\s*</tags>', response_text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    start_tag = "<tags>"
+    end_tag = "</tags>"
+    start_index = response_text.find(start_tag)
+    end_index = response_text.find(end_tag)
+
+    if start_index != -1 and end_index != -1:
+        # Adjust indices to extract content between the tags
+        start_index += len(start_tag)
+        yaml_content = response_text[start_index:end_index].strip()
+        return yaml_content
     return None
 
 def animate_thinking(stop_event):
@@ -313,18 +338,8 @@ def compute_diff(original_content: str, updated_content: str, filename: str) -> 
     return ''.join(diff)
 
 def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
-    """
-    Generates unified diffs between original and updated file contents.
-
-    Args:
-        ai_response (str): The AI's YAML response with edit instructions.
-        files_to_edit (List[str]): List of file paths to edit.
-
-    Returns:
-        str: The formatted diffs for all files.
-    """
     yaml_content = extract_yaml_blocks(ai_response)
-    edit_instructions = yaml.safe_load(yaml_content)
+    edit_instructions = load_yaml(yaml_content)
     diffs = ""
 
     for file_path in files_to_edit:
@@ -334,7 +349,7 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
             logging.error(f"No edit instructions found for {filename}.")
             continue
 
-        instructions = edit_instructions[filename]
+        edits = edit_instructions[filename]
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 original_content = f.read()
@@ -344,7 +359,7 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
             continue
 
         # Apply edits to get the updated content
-        updated_content = apply_edits_to_content(original_content, instructions)
+        updated_content = apply_edits_to_content(original_content, edits)
 
         # Compute the diff between original and updated content
         diff = compute_diff(original_content, updated_content, filename)
@@ -357,7 +372,7 @@ def display_ai_response(response):
 
     if yaml_content:
         try:
-            parsed_yaml = yaml.safe_load(yaml_content)
+            parsed_yaml = load_yaml(yaml_content)
             # Determine if the response is for file creation or editing
             if all(isinstance(value, dict) and 'code' in value for value in parsed_yaml.values()):
                 # File creation response
@@ -368,13 +383,25 @@ def display_ai_response(response):
                     console.print(Markdown(code_block))
             else:
                 # File editing response
-                for filename, instructions in parsed_yaml.items():
-                    console.print(f"\n[bold blue]Edit Instructions for {filename}:[/bold blue]")
-                    for instr in instructions:
-                        console.print(f"- Operation: {instr.get('operation')}")
-                        console.print(f"  Pattern: {instr.get('pattern')}")
-                        if 'replacement' in instr:
-                            console.print(f"  Replacement: {instr.get('replacement')}")
+                for filename, edits in parsed_yaml.items():
+                    console.print(f"\n[bold blue]Edits for {filename}:[/bold blue]")
+                    for edit in edits:
+                        find_field = edit.get('find', '')
+                        replace_field = edit.get('replace', '')
+
+                        # Extract code between <find></find> and <replace></replace> tags
+                        find_match = re.search(r'<find>([\s\S]*?)</find>', find_field)
+                        replace_match = re.search(r'<replace>([\s\S]*?)</replace>', replace_field)
+
+                        find_code = find_match.group(1).strip() if find_match else ''
+                        replace_code = replace_match.group(1).strip() if replace_match else ''
+
+                        console.print("[bold green]<find>[/bold green]")
+                        console.print(Markdown(f"```python\n{find_code}\n```"))
+                        console.print("[bold green]</find>[/bold green]")
+                        console.print("[bold red]<replace>[/bold red]")
+                        console.print(Markdown(f"```python\n{replace_code}\n```"))
+                        console.print("[bold red]</replace>[/bold red]")
         except yaml.YAMLError as e:
             console.print(f"[red]Error parsing YAML content: {str(e)}[/red]")
             logging.error(f"Error parsing YAML content: {str(e)}")
@@ -473,36 +500,23 @@ def prompt_edit_instructions():
     """
     console.print("\n[bold yellow]Please enter your edit instructions for the added files:[/bold yellow]")
 
-def get_edit_response(edit_request, conversation_history, files_to_edit):
-    """
-    Sends the edit instructions to the AI and retrieves the updated file contents.
-
-    Args:
-        edit_request (str): The user's edit instructions.
-        conversation_history (list): The current conversation history.
-        files_to_edit (list): List of filenames to edit.
-    """
+def get_edit_response(edit_request, conversation_history, files_to_edit, max_retries=3):
     global total_input_cost, total_output_cost, total_chat_cost
 
-    # Get the formatted editor prompt with the file list
     formatted_editor_prompt = get_formatted_editor_prompt(files_to_edit)
 
-    # Build messages for the edit operation
     edit_messages = []
-
-    # Add the formatted `editor_prompt` as the first message
     edit_messages.append({"role": "user", "content": formatted_editor_prompt})
 
-    # Include the file contents from the conversation history
     for message in conversation_history:
         if message.get('content', '').startswith('Content from'):
             edit_messages.append(message)
 
-    # Add the user's edit request
     edit_messages.append({"role": "user", "content": edit_request})
 
-    while True:
-        # Proceed with sending the request to the assistant
+    retry_count = 0
+
+    while retry_count < max_retries:
         stop_event = threading.Event()
         animation_thread = threading.Thread(target=animate_thinking, args=(stop_event,))
         animation_thread.start()
@@ -514,21 +528,19 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
                 max_completion_tokens=32768
             )
 
-            # Log the raw AI response
             raw_ai_response = response.choices[0].message.content
             logging.debug(f"AI Edit Response: {raw_ai_response}")
 
             stop_event.set()
             animation_thread.join()
-            sys.stdout.write("\r" + " " * 50 + "\r")  # Clear the "Thinking" line
+            sys.stdout.write("\r" + " " * 50 + "\r")
             sys.stdout.flush()
 
             edit_response = raw_ai_response
 
-            # Validate the response
             valid, message = is_valid_yaml_content_response(edit_response)
             if valid:
-                console.print("\nEdit Instructions (Updated File Contents):")
+                console.print("\nEdit Instructions:")
                 display_ai_response(edit_response)
 
                 usage = response.usage
@@ -538,7 +550,6 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
 
                 input_cost, output_cost, message_cost = calculate_cost(usage.prompt_tokens, usage.completion_tokens, EditorModel)
 
-                # Accumulate costs
                 total_input_cost += input_cost
                 total_output_cost += output_cost
                 total_chat_cost += message_cost
@@ -548,35 +559,57 @@ def get_edit_response(edit_request, conversation_history, files_to_edit):
                               f"Total: ${message_cost:.4f}[/cyan]")
                 console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
-                # Compute diffs and display them
-                diffs = generate_diffs(edit_response, files_to_edit)
-                console.print("\n[bold yellow]Please review the following changes before applying:[/bold yellow]")
-                # console.print(Markdown(diffs))
+                # Apply edits and collect failed edits
+                failed_edits = apply_file_updates(edit_response, conversation_history, files_to_edit)
 
-                # Prompt user for confirmation before applying edits
-                confirmation = prompt_user_confirmation()
-                if confirmation:
-                    apply_file_updates(edit_response, conversation_history, files_to_edit)
+                if failed_edits:
+                    # Report failed edits
+                    console.print(f"[yellow]Some edits could not be applied:[/yellow]")
+                    for filename, edits in failed_edits.items():
+                        console.print(f"[yellow]In file {filename}:[/yellow]")
+                        for edit in edits:
+                            console.print(f"[yellow]- {edit}[/yellow]")
+
+                    # Prepare error message for the assistant
+                    error_message = "The following edits could not be applied because the 'find' patterns did not match any content in the files:\n"
+                    for filename, edits in failed_edits.items():
+                        error_message += f"In file {filename}:\n"
+                        for edit in edits:
+                            error_message += f"- {edit}\n"
+                    error_message += "Please correct the 'find' patterns to match the content exactly."
+
+                    # Update the messages for the next retry
+                    edit_messages.append({"role": "assistant", "content": edit_response})
+                    edit_messages.append({"role": "user", "content": error_message})
+
+                    console.print(f"[yellow]Retrying with corrected edit instructions from the assistant.[/yellow]")
+                    retry_count += 1
                 else:
-                    console.print("[yellow]Edits have been discarded by the user.[/yellow]")
-
-                break
+                    # All edits applied successfully
+                    console.print("[green]All edits applied successfully.[/green]")
+                    break  # Exit the retry loop
             else:
-                # Inform the assistant about the error and request a correction
                 console.print(f"[red]Validation Error: {message}[/red]")
-                logging.error(f"Validation Error: {message}")
-
-                error_message = f"The previous response did not meet the required format because: {message}. Please provide the updated file contents again, strictly adhering to the format specified."
+                error_message = f"The previous response did not meet the required format because: {message}. Please provide the updated edit instructions again, strictly adhering to the format specified, including proper <find></find> and <replace></replace> tags."
                 edit_messages.append({"role": "assistant", "content": edit_response})
                 edit_messages.append({"role": "user", "content": error_message})
                 console.print(f"[yellow]Invalid response format. Requesting correction from the assistant.[/yellow]")
-                continue
+                retry_count += 1
+
+            if retry_count >= max_retries:
+                console.print("[red]Maximum number of retries reached. Some edits could not be applied.[/red]")
+                break  # Ensure the loop exits after maximum retries
 
         except Exception as e:
             stop_event.set()
             console.print(f"[red]An error occurred during editing: {str(e)}[/red]")
             logging.error(f"An error occurred during editing: {str(e)}")
-            break
+            retry_count += 1
+            if retry_count >= max_retries:
+                console.print("[red]Maximum number of retries reached due to errors. Exiting edit process.[/red]")
+                break
+
+    return  # Ensure the function exits properly
 
 def is_valid_yaml_content_response(response_text):
     yaml_content = extract_yaml_blocks(response_text)
@@ -584,23 +617,27 @@ def is_valid_yaml_content_response(response_text):
         return False, "No YAML content found."
 
     try:
-        parsed_yaml = yaml.safe_load(yaml_content)
+        parsed_yaml = load_yaml(yaml_content)
     except yaml.YAMLError as e:
-        return False, f"YAML parsing error: {str(e)}"
+        error_detail = str(e)
+        return False, f"YAML parsing error: {error_detail}"
 
     if not isinstance(parsed_yaml, dict):
         return False, "Parsed YAML is not a dictionary."
 
-    for filename, instructions in parsed_yaml.items():
-        if not isinstance(instructions, list):
-            return False, f"Instructions for {filename} are not a list."
-        for instr in instructions:
-            if not isinstance(instr, dict):
-                return False, f"An instruction in {filename} is not a dictionary."
-            if 'operation' not in instr or 'pattern' not in instr:
-                return False, f"Missing keys in an instruction for {filename}."
-            if instr['operation'] in ['replace', 'insert'] and 'replacement' not in instr:
-                return False, f"Missing 'replacement' for operation '{instr['operation']}' in {filename}."
+    for filename, edits in parsed_yaml.items():
+        if not isinstance(edits, list):
+            return False, f"Edits for '{filename}' are not a list."
+        for index, edit in enumerate(edits):
+            if not isinstance(edit, dict):
+                return False, f"Edit #{index + 1} in '{filename}' is not a dictionary."
+            if 'find' not in edit or 'replace' not in edit:
+                return False, f"Missing 'find' or 'replace' in edit #{index + 1} for '{filename}'."
+            # Check if the find and replace fields contain the proper tags
+            if '<find>' not in edit['find'] or '</find>' not in edit['find']:
+                return False, f"In file '{filename}', edit #{index + 1} is missing proper <find></find> tags."
+            if '<replace>' not in edit['replace'] or '</replace>' not in edit['replace']:
+                return False, f"In file '{filename}', edit #{index + 1} is missing proper <replace></replace> tags."
     return True, "Valid YAML content response."
 
 def clean_diff(diff: str) -> str:
@@ -620,32 +657,68 @@ def clean_diff(diff: str) -> str:
         cleaned_lines.append(line)
     return '\n'.join(cleaned_lines)
 
-import re
 
-def apply_edits_to_content(content: str, instructions: list) -> str:
-    for instr in instructions:
-        operation = instr.get('operation')
-        pattern = instr.get('pattern')
-        replacement = instr.get('replacement', '')
 
-        if operation == 'replace':
-            content = re.sub(pattern, replacement, content)
-        elif operation == 'insert':
-            content = re.sub(pattern, f"{pattern}{replacement}", content)
-        elif operation == 'delete':
-            content = re.sub(pattern, '', content)
+def extract_between_tags(text, start_tag, end_tag):
+    start_index = text.find(start_tag)
+    end_index = text.find(end_tag)
+    if start_index != -1 and end_index != -1:
+        start_index += len(start_tag)
+        return text[start_index:end_index]
+    else:
+        return None
+
+def decode_code_field(field: str, field_name: str) -> str:
+    try:
+        return field.encode().decode('unicode_escape')
+    except UnicodeDecodeError:
+        console.print(f"[yellow]Warning: Unable to decode {field_name} field. Using as-is.[/yellow]")
+        return field
+
+def normalize_whitespace(text):
+    # Replace all whitespace characters (space, tab, newline, etc.) with a single space
+    return ' '.join(text.split())
+
+def apply_edits_to_content(content: str, edits: list) -> tuple[str, list]:
+    failed_edits = []
+    for edit in edits:
+        find_field = edit.get('find', '')
+        replace_field = edit.get('replace', '')
+
+        # Extract code between <find></find> and <replace></replace> tags
+        find_str = extract_between_tags(find_field, '<find>', '</find>')
+        replace_str = extract_between_tags(replace_field, '<replace>', '</replace>')
+
+        if find_str is None or replace_str is None:
+            console.print(f"[red]Invalid format in edit. Skipping this edit.[/red]")
+            failed_edits.append(edit)
+            continue
+
+        # Decode code fields if necessary
+        find_str = decode_code_field(find_str, 'find')
+        replace_str = decode_code_field(replace_str, 'replace')
+
+        # Normalize the whitespace in content and find_str
+        normalized_content = normalize_whitespace(content)
+        normalized_find_str = normalize_whitespace(find_str)
+
+        # Try to find the normalized 'find' string in the normalized content
+        if normalized_find_str in normalized_content:
+            # Replace in the original content
+            content = content.replace(find_str, replace_str, 1)
         else:
-            console.print(f"[red]Unknown operation '{operation}' in instructions.[/red]")
-    return content
+            console.print(f"[yellow]Warning: 'find' string not found in content after normalization.[/yellow]")
+            failed_edits.append(edit)
 
+    return content, failed_edits
 
-def apply_edit_instructions(file_path: Path, instructions: list):
+def apply_edit_instructions(file_path: Path, edits: list):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         # Apply edits to get the updated content
-        updated_content = apply_edits_to_content(content, instructions)
+        updated_content = apply_edits_to_content(content, edits)
 
         # Backup the original file
         backup_file(file_path)
@@ -670,44 +743,60 @@ def apply_file_updates(ai_response, conversation_history, files_to_edit):
         ai_response (str): The AI's YAML response with edit instructions.
         conversation_history (list): The current conversation history.
         files_to_edit (list): List of file paths to edit.
+
+    Returns:
+        dict: A dictionary of failed edits per file.
     """
+    failed_edits = {}
+
     try:
         yaml_content = extract_yaml_blocks(ai_response)
-        edit_instructions = yaml.safe_load(yaml_content)
+        edit_instructions = load_yaml(yaml_content)
 
         # Map filenames to their full paths
         filename_to_path = {Path(f).name: Path(f) for f in files_to_edit}
 
-        for filename, instructions in edit_instructions.items():
-            if filename not in filename_to_path:
-                console.print(f"[red]Filename '{filename}' is not in the list of files to edit. Skipping.[/red]")
-                logging.error(f"Filename '{filename}' is not in the list of files to edit.")
-                continue
+        # Now apply the edits after user confirmation
+        if prompt_user_confirmation():
+            for filename, edits in edit_instructions.items():
+                if filename not in filename_to_path:
+                    console.print(f"[red]Filename '{filename}' is not in the list of files to edit. Skipping.[/red]")
+                    continue
 
-            file_path = filename_to_path[filename]
+                file_path = filename_to_path[filename]
 
-            if not file_path.is_file():
-                console.print(f"[red]File not found for editing: {file_path}[/red]")
-                logging.error(f"File not found for editing: {file_path}")
-                continue
+                if not file_path.is_file():
+                    console.print(f"[red]File not found for editing: {file_path}[/red]")
+                    continue
 
-            logging.debug(f"Applying edits to file: {file_path}")
-            logging.debug(f"Edit instructions: {instructions}")
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
 
-            apply_edit_instructions(file_path, instructions)
+                    # Apply edits to get the updated content and failed edits
+                    updated_content, file_failed_edits = apply_edits_to_content(content, edits)
 
-            logging.debug(f"Edits applied to file: {file_path}")
+                    if file_failed_edits:
+                        failed_edits[filename] = file_failed_edits
 
-        # Add confirmation to conversation history
-        confirmation_message = "Edits have been applied successfully."
-        conversation_history.append({"role": "assistant", "content": confirmation_message})
-        logging.info(confirmation_message)
+                    # Backup the original file
+                    backup_file(file_path)
+
+                    # Write the updated content to the file
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(updated_content)
+
+                    console.print(f"[green]Successfully applied edits to {file_path}.[/green]")
+
+                except Exception as e:
+                    console.print(f"[red]Failed to apply edits to {file_path}: {str(e)}[/red]")
+        else:
+            console.print("[yellow]Edits were not applied as per user's decision.[/yellow]")
 
     except Exception as e:
-        error_message = f"An unexpected error occurred while applying edits: {str(e)}"
-        console.print(f"[red]{error_message}[/red]")
-        logging.error(error_message)
-        logging.exception("Detailed traceback:")
+        console.print(f"[red]An unexpected error occurred: {str(e)}[/red]")
+
+    return failed_edits
 
 def backup_file(file_path: Path):
     """
