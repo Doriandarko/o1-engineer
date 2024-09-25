@@ -102,5 +102,6 @@ We welcome contributions! Please follow these steps:
 - OpenAI for providing the powerful API.
 
 ## ✨ Star History
-<iframe style="width:100%;height:auto;min-width:600px;min-height:400px;" src="https://star-history.com/embed?secret=#o1-engineer/o1-engineer&Date" frameBorder="0"></iframe>
+
+[![Star History Chart](https://api.star-history.com/svg?repos=o1-engineer/o1-engineer&type=Date)](https://star-history.com/#o1-engineer/o1-engineer&Date)
 
