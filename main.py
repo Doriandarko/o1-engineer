@@ -18,6 +18,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import shutil
 import difflib
+from fuzzywuzzy import fuzz
 
 
 def load_yaml(yaml_content):
@@ -34,6 +35,13 @@ console = Console()
 load_dotenv()  # Ensure this is called before accessing environment variables
 
 # Set up OpenAI client securely using environment variables
+# It's highly recommended **NOT** to hard-code your API key.
+# Instead, store it in the .env file and access it using os.getenv.
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    console.print("[red]OpenAI API key not found in environment variables.[/red]")
+    sys.exit(1)
+
 client = OpenAI(api_key="YOUR KEY")
 
 # Set the model as a variable at the top of the script
@@ -48,7 +56,6 @@ total_chat_cost = 0.0
 
 # Define the maximum number of messages to keep in conversation history, the more messages the higher the cost
 MAX_CONVERSATION_HISTORY = 10
-
 
 # Planning prompt
 planningprompt = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough. Here's the user's request:"""
@@ -90,55 +97,51 @@ src/utils/helper.py:
 # Editor prompt for direct file updates
 def get_formatted_editor_prompt(files_to_edit):
     file_list = '\n'.join([f"- {Path(f).name}" for f in files_to_edit])
-    return f"""You are required to provide specific edits for the specified files based on the user's request.
+    return f"""You are an AI code editor assistant. Your task is to provide specific edits for the files listed below based on the user's request. Follow these guidelines strictly:
 
-**Guidelines:**
-
-1. **Available Files:** The following files are available for editing:
+1. Available Files:
 {file_list}
 
-2. **Important Notes:**
-   - **Copy Exact Code for `<find>`:** When creating the `<find>` code snippets, **copy the exact code from the files provided**.
-   - **Use Correct Tagging:** Ensure that you wrap the code snippets with the appropriate tags:
-     - `<find></find>` for the code to find.
-     - `<replace></replace>` for the code to replace.
-   - **Ensure Proper YAML Formatting:** Pay attention to indentation and special characters to produce valid YAML. Wrap code blocks using `|` and indent appropriately.
 
-3. **Response Format:** Return your response **only** as a YAML object enclosed within `<tags>` and `</tags>`. Do not include any text before or after the YAML content.
+2. Response Format:
+   - Provide your response as a single YAML object within <edit> and </edit> tags.
+   - Do not include any text outside these tags.
 
-4. **YAML Structure:**
-   - **Keys:** The YAML object should have **filenames** as keys.
-   - **Values:** Each filename maps to a list of edits.
-   - **Each Edit:** Should be an object with two keys:
-     - `find`: The exact code snippet to find, enclosed within `<find></find>` tags.
-     - `replace`: The code snippet to replace it with, enclosed within `<replace></replace>` tags.
+3. YAML Structure:
+   - Use filenames as top-level keys.
+   - Each filename should map to a list of edit objects.
+   - Each edit object must have 'find' and 'replace' keys.
 
-5. **Code Snippets:**
-   - **Maintain Formatting:** Preserve the original formatting, including indentation and line breaks.
-   - **Escape Special Characters:** If the code contains special YAML characters (like `:`, `-`, `?`, etc.), wrap the entire code block in double quotes (`"`), or use the YAML block scalar indicator `|` properly.
-   - **Use Block Scalars:** Utilize `|` for multiline strings to maintain formatting.
-   - **Example**:
+4. Code Snippet Formatting:
+   - Preserve original formatting, including indentation and line breaks.
+   - For multiline strings, use the YAML block scalar indicator '|' and indent properly.
+   - If code contains special YAML characters (:, -, ?, etc.), wrap the entire block in double quotes (") or use '|'.
 
-<tags>
+Example YAML Structure:
+
+<edit>
 example.py:
   - find: |
-      <find>
       def old_function():
+          # Old implementation
           pass
-      </find>
     replace: |
-      <replace>
       def new_function():
           # New implementation
-          pass
-      </replace>
-</tags>
+          return "Updated function"
 
-6. **No Additional Text:** Do not include any explanations, comments, or any other text outside the `<tags>` block.
+another_file.py:
+  - find: |
+      print("Hello, World!")
+    replace: |
+      print("Greetings, Universe!")
+</edit>
+
+6. **No Additional Text:** Do not include any explanations, comments, or any other text outside the `<edit>` block.
 
 7. **Remember:** Only use this format when explicitly asked to provide specific edits for the available files.
 
-**Important:** Be precise and strictly adhere to the format, including proper tagging, indentation, and escaping.
+**Important:** Be precise and strictly adhere to the format.
 """
 
 # Prompt toolkit style
@@ -222,12 +225,13 @@ def prompt_next_request():
     """
     Prompts the user for the next request after adding files.
     """
-    console.print("\n[bold yellow]Files have been added to the context. Please enter your next request:[/bold yellow]")
+    console.print("\n[bold yellow]Files have been added to the context.[/bold yellow]")
 
 def parse_and_create_files(ai_response):
     created_files = []
     script_dir = Path(__file__).parent.resolve()
-    yaml_content = extract_yaml_blocks(ai_response)
+    # Pass the correct tags for file creation
+    yaml_content = extract_yaml_blocks(ai_response, "<tags>", "</tags>")
 
     if not yaml_content:
         # logging.warning("No YAML content found in AI response.")
@@ -266,23 +270,22 @@ def parse_and_create_files(ai_response):
 
     return created_files
 
-def extract_yaml_blocks(response_text):
+def extract_yaml_blocks(response_text, start_tag, end_tag):
     """
-    Extracts YAML content enclosed within <tags> and </tags> from the response text.
+    Extracts YAML content enclosed within specified start and end tags from the response text.
 
     Args:
         response_text (str): The AI's response containing YAML.
+        start_tag (str): The opening tag to look for.
+        end_tag (str): The closing tag to look for.
 
     Returns:
         str: The extracted YAML content or None if not found.
     """
-    start_tag = "<tags>"
-    end_tag = "</tags>"
     start_index = response_text.find(start_tag)
     end_index = response_text.find(end_tag)
 
     if start_index != -1 and end_index != -1:
-        # Adjust indices to extract content between the tags
         start_index += len(start_tag)
         yaml_content = response_text[start_index:end_index].strip()
         return yaml_content
@@ -338,7 +341,13 @@ def compute_diff(original_content: str, updated_content: str, filename: str) -> 
     return ''.join(diff)
 
 def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
-    yaml_content = extract_yaml_blocks(ai_response)
+    # Pass the correct tags for edit operations
+    yaml_content = extract_yaml_blocks(ai_response, "<edit>", "</edit>")
+    if not yaml_content:
+        console.print(f"[red]No edit instructions found in AI response.[/red]")
+        logging.error("No edit instructions found in AI response.")
+        return ""
+
     edit_instructions = load_yaml(yaml_content)
     diffs = ""
 
@@ -359,7 +368,12 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
             continue
 
         # Apply edits to get the updated content
-        updated_content = apply_edits_to_content(original_content, edits)
+        updated_content, failed_edits = apply_edits_to_content(original_content, edits)
+
+        if failed_edits:
+            console.print(f"[yellow]Warning: Some edits failed for {file_path}.[/yellow]")
+            for failed_edit in failed_edits:
+                console.print(f"[yellow]Failed edit: {failed_edit}[/yellow]")
 
         # Compute the diff between original and updated content
         diff = compute_diff(original_content, updated_content, filename)
@@ -367,34 +381,29 @@ def generate_diffs(ai_response: str, files_to_edit: List[str]) -> str:
 
     return diffs
 
-def display_ai_response(response):
-    yaml_content = extract_yaml_blocks(response)
+def display_ai_response(response, block_type="tags"):
+    start_tag = "<tags>" if block_type == "tags" else "<edit>"
+    end_tag = "</tags>" if block_type == "tags" else "</edit>"
+
+    yaml_content = extract_yaml_blocks(response, start_tag, end_tag)
 
     if yaml_content:
         try:
             parsed_yaml = load_yaml(yaml_content)
-            # Determine if the response is for file creation or editing
-            if all(isinstance(value, dict) and 'code' in value for value in parsed_yaml.values()):
+            if block_type == "tags":
                 # File creation response
                 for filename, file_info in parsed_yaml.items():
                     console.print(f"\n[bold blue]Content for {filename}:[/bold blue]")
                     code = decode_code_field(file_info['code'], filename)
                     code_block = f"```{file_info['extension']}\n{code}\n```"
                     console.print(Markdown(code_block))
-            else:
+            elif block_type == "edit":
                 # File editing response
                 for filename, edits in parsed_yaml.items():
                     console.print(f"\n[bold blue]Edits for {filename}:[/bold blue]")
                     for edit in edits:
-                        find_field = edit.get('find', '')
-                        replace_field = edit.get('replace', '')
-
-                        # Extract code between <find></find> and <replace></replace> tags
-                        find_match = re.search(r'<find>([\s\S]*?)</find>', find_field)
-                        replace_match = re.search(r'<replace>([\s\S]*?)</replace>', replace_field)
-
-                        find_code = find_match.group(1).strip() if find_match else ''
-                        replace_code = replace_match.group(1).strip() if replace_match else ''
+                        find_code = edit.get('find', '').strip()
+                        replace_code = edit.get('replace', '').strip()
 
                         console.print("[bold green]<find>[/bold green]")
                         console.print(Markdown(f"```python\n{find_code}\n```"))
@@ -538,10 +547,10 @@ def get_edit_response(edit_request, conversation_history, files_to_edit, max_ret
 
             edit_response = raw_ai_response
 
-            valid, message = is_valid_yaml_content_response(edit_response)
+            valid, message = is_valid_yaml_content_response(edit_response, block_type="edit")
             if valid:
                 console.print("\nEdit Instructions:")
-                display_ai_response(edit_response)
+                display_ai_response(edit_response, block_type="edit")
 
                 usage = response.usage
                 console.print(f"[cyan]Edit - Prompt: {usage.prompt_tokens}, "
@@ -560,7 +569,7 @@ def get_edit_response(edit_request, conversation_history, files_to_edit, max_ret
                 console.print(f"[cyan]Total Chat Cost So Far: ${total_chat_cost:.4f}[/cyan]")
 
                 # Apply edits and collect failed edits
-                failed_edits = apply_file_updates(edit_response, conversation_history, files_to_edit)
+                failed_edits = apply_file_updates(edit_response, conversation_history, files_to_edit, block_type="edit")
 
                 if failed_edits:
                     # Report failed edits
@@ -590,7 +599,7 @@ def get_edit_response(edit_request, conversation_history, files_to_edit, max_ret
                     break  # Exit the retry loop
             else:
                 console.print(f"[red]Validation Error: {message}[/red]")
-                error_message = f"The previous response did not meet the required format because: {message}. Please provide the updated edit instructions again, strictly adhering to the format specified, including proper <find></find> and <replace></replace> tags."
+                error_message = f"The previous response did not meet the required format because: {message}. Please provide the updated edit instructions again, strictly adhering to the format specified."
                 edit_messages.append({"role": "assistant", "content": edit_response})
                 edit_messages.append({"role": "user", "content": error_message})
                 console.print(f"[yellow]Invalid response format. Requesting correction from the assistant.[/yellow]")
@@ -611,8 +620,11 @@ def get_edit_response(edit_request, conversation_history, files_to_edit, max_ret
 
     return  # Ensure the function exits properly
 
-def is_valid_yaml_content_response(response_text):
-    yaml_content = extract_yaml_blocks(response_text)
+def is_valid_yaml_content_response(response_text, block_type="tags"):
+    start_tag = "<tags>" if block_type == "tags" else "<edit>"
+    end_tag = "</tags>" if block_type == "tags" else "</edit>"
+
+    yaml_content = extract_yaml_blocks(response_text, start_tag, end_tag)
     if not yaml_content:
         return False, "No YAML content found."
 
@@ -625,19 +637,23 @@ def is_valid_yaml_content_response(response_text):
     if not isinstance(parsed_yaml, dict):
         return False, "Parsed YAML is not a dictionary."
 
-    for filename, edits in parsed_yaml.items():
-        if not isinstance(edits, list):
-            return False, f"Edits for '{filename}' are not a list."
-        for index, edit in enumerate(edits):
-            if not isinstance(edit, dict):
-                return False, f"Edit #{index + 1} in '{filename}' is not a dictionary."
-            if 'find' not in edit or 'replace' not in edit:
-                return False, f"Missing 'find' or 'replace' in edit #{index + 1} for '{filename}'."
-            # Check if the find and replace fields contain the proper tags
-            if '<find>' not in edit['find'] or '</find>' not in edit['find']:
-                return False, f"In file '{filename}', edit #{index + 1} is missing proper <find></find> tags."
-            if '<replace>' not in edit['replace'] or '</replace>' not in edit['replace']:
-                return False, f"In file '{filename}', edit #{index + 1} is missing proper <replace></replace> tags."
+    if block_type == "tags":
+        # Validation for file creation
+        for filename, file_info in parsed_yaml.items():
+            if not isinstance(file_info, dict):
+                return False, f"File info for '{filename}' is not a dictionary."
+            if 'extension' not in file_info or 'code' not in file_info:
+                return False, f"Missing 'extension' or 'code' in file info for '{filename}'."
+    elif block_type == "edit":
+        # Validation for file editing
+        for filename, edits in parsed_yaml.items():
+            if not isinstance(edits, list):
+                return False, f"Edits for '{filename}' are not a list."
+            for index, edit in enumerate(edits):
+                if not isinstance(edit, dict):
+                    return False, f"Edit #{index + 1} in '{filename}' is not a dictionary."
+                if 'find' not in edit or 'replace' not in edit:
+                    return False, f"Missing 'find' or 'replace' in edit #{index + 1} for '{filename}'."
     return True, "Valid YAML content response."
 
 def clean_diff(diff: str) -> str:
@@ -657,8 +673,6 @@ def clean_diff(diff: str) -> str:
         cleaned_lines.append(line)
     return '\n'.join(cleaned_lines)
 
-
-
 def extract_between_tags(text, start_tag, end_tag):
     start_index = text.find(start_tag)
     end_index = text.find(end_tag)
@@ -668,47 +682,62 @@ def extract_between_tags(text, start_tag, end_tag):
     else:
         return None
 
-def decode_code_field(field: str, field_name: str) -> str:
-    try:
-        return field.encode().decode('unicode_escape')
-    except UnicodeDecodeError:
-        console.print(f"[yellow]Warning: Unable to decode {field_name} field. Using as-is.[/yellow]")
-        return field
+def apply_edits_to_content(content: str, edits: list, threshold=60) -> tuple:
+    """
+    Applies a list of edits to the given content using exact and fuzzy matching.
 
-def normalize_whitespace(text):
-    # Replace all whitespace characters (space, tab, newline, etc.) with a single space
-    return ' '.join(text.split())
+    Args:
+        content (str): The original file content.
+        edits (list): A list of edits, each containing 'find' and 'replace' strings.
+        threshold (int): Similarity threshold (0-100) for fuzzy matching.
 
-def apply_edits_to_content(content: str, edits: list) -> tuple[str, list]:
+    Returns:
+        tuple: The updated content and a list of failed edits.
+    """
     failed_edits = []
     for edit in edits:
-        find_field = edit.get('find', '')
-        replace_field = edit.get('replace', '')
+        find_str = edit.get('find', '').strip()
+        replace_str = edit.get('replace', '').strip()
 
-        # Extract code between <find></find> and <replace></replace> tags
-        find_str = extract_between_tags(find_field, '<find>', '</find>')
-        replace_str = extract_between_tags(replace_field, '<replace>', '</replace>')
-
-        if find_str is None or replace_str is None:
-            console.print(f"[red]Invalid format in edit. Skipping this edit.[/red]")
+        if not find_str or not replace_str:
+            console.print(f"[red]Invalid edit: 'find' or 'replace' is empty. Skipping this edit.[/red]")
             failed_edits.append(edit)
             continue
 
-        # Decode code fields if necessary
-        find_str = decode_code_field(find_str, 'find')
-        replace_str = decode_code_field(replace_str, 'replace')
+        # Decode and normalize whitespace
+        find_str = decode_code_field(find_str, 'find').strip()
+        replace_str = decode_code_field(replace_str, 'replace').strip()
 
-        # Normalize the whitespace in content and find_str
-        normalized_content = normalize_whitespace(content)
-        normalized_find_str = normalize_whitespace(find_str)
+        # Debugging: Log the find and replace strings
+        logging.debug(f"Applying edit:\nFind:\n{find_str}\nReplace:\n{replace_str}\n")
 
-        # Try to find the normalized 'find' string in the normalized content
-        if normalized_find_str in normalized_content:
-            # Replace in the original content
+        # First attempt exact matching
+        if find_str in content:
             content = content.replace(find_str, replace_str, 1)
-        else:
-            console.print(f"[yellow]Warning: 'find' string not found in content after normalization.[/yellow]")
+            console.print(f"[green]Successfully applied exact match edit for '{find_str}'.[/green]")
+            logging.info(f"Successfully replaced exact match '{find_str}' with '{replace_str}'.")
+            continue
+
+        # If exact match fails, attempt fuzzy matching
+        lines = content.splitlines()
+        match_found = False
+        for i, line in enumerate(lines):
+            similarity = fuzz.ratio(find_str, line.strip())
+            if similarity >= threshold:
+                lines[i] = replace_str
+                match_found = True
+                console.print(f"[green]Successfully applied fuzzy match edit for line {i+1} (Similarity: {similarity}%).[/green]")
+                logging.info(f"Successfully replaced line {i+1}: '{line.strip()}' with '{replace_str}' (Similarity: {similarity}%).")
+                break
+
+        if not match_found:
+            console.print(f"[yellow]Warning: 'find' string '{find_str}' not found in content.[/yellow]")
+            logging.warning(f"'find' string '{find_str}' not found in content.")
             failed_edits.append(edit)
+            continue
+
+        # Reconstruct the content
+        content = '\n'.join(lines)
 
     return content, failed_edits
 
@@ -717,8 +746,13 @@ def apply_edit_instructions(file_path: Path, edits: list):
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # Apply edits to get the updated content
-        updated_content = apply_edits_to_content(content, edits)
+        # Apply edits to get the updated content and failed edits
+        updated_content, failed_edits = apply_edits_to_content(content, edits)
+
+        if failed_edits:
+            console.print(f"[yellow]Warning: Some edits failed for {file_path}.[/yellow]")
+            for failed_edit in failed_edits:
+                console.print(f"[yellow]Failed edit: {failed_edit}[/yellow]")
 
         # Backup the original file
         backup_file(file_path)
@@ -734,24 +768,22 @@ def apply_edit_instructions(file_path: Path, edits: list):
         console.print(f"[red]Failed to apply edits to {file_path}: {str(e)}[/red]")
         logging.error(f"Failed to apply edits to {file_path}: {str(e)}")
 
-
-def apply_file_updates(ai_response, conversation_history, files_to_edit):
+def apply_file_updates(ai_response, conversation_history, files_to_edit, block_type="edit"):
     """
     Parses the AI's edit instructions and applies them to the specified files.
-
-    Args:
-        ai_response (str): The AI's YAML response with edit instructions.
-        conversation_history (list): The current conversation history.
-        files_to_edit (list): List of file paths to edit.
-
-    Returns:
-        dict: A dictionary of failed edits per file.
     """
     failed_edits = {}
 
     try:
-        yaml_content = extract_yaml_blocks(ai_response)
-        edit_instructions = load_yaml(yaml_content)
+        start_tag = "<tags>" if block_type == "tags" else "<edit>"
+        end_tag = "</tags>" if block_type == "tags" else "</edit>"
+        yaml_content = extract_yaml_blocks(ai_response, start_tag, end_tag)
+
+        if not yaml_content:
+            console.print(f"[red]No YAML content found in AI response.[/red]")
+            return failed_edits
+
+        edit_instructions = yaml.safe_load(yaml_content)
 
         # Map filenames to their full paths
         filename_to_path = {Path(f).name: Path(f) for f in files_to_edit}
@@ -790,6 +822,7 @@ def apply_file_updates(ai_response, conversation_history, files_to_edit):
 
                 except Exception as e:
                     console.print(f"[red]Failed to apply edits to {file_path}: {str(e)}[/red]")
+
         else:
             console.print("[yellow]Edits were not applied as per user's decision.[/yellow]")
 
@@ -801,19 +834,11 @@ def apply_file_updates(ai_response, conversation_history, files_to_edit):
 def backup_file(file_path: Path):
     """
     Creates a backup of the specified file.
-
-    Args:
-        file_path (Path): The path to the file to back up.
-
-    Returns:
-        Path: The path to the backup file.
     """
     backup_path = file_path.with_suffix(file_path.suffix + '.bak')
     shutil.copy(file_path, backup_path)
-    logging.info(f"Backup created for {file_path} at {backup_path}")
-    console.print(f"[yellow]Backup created for {file_path} at {backup_path}.[/yellow]")
+    # console.print(f"[yellow]Backup created for {file_path} at {backup_path}.[/yellow]")
     return backup_path
-
 
 def prompt_user_confirmation():
     """
@@ -822,10 +847,8 @@ def prompt_user_confirmation():
     while True:
         confirmation = input("\nDo you want to apply these edits? (yes/no): ").strip().lower()
         if confirmation in ['yes', 'y']:
-            logging.info("User confirmed to apply edits.")
             return True
         elif confirmation in ['no', 'n']:
-            logging.info("User declined to apply edits.")
             return False
         else:
             console.print("[red]Please respond with 'yes' or 'no'.[/red]")
