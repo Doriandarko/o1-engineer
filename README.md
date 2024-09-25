@@ -1,8 +1,8 @@
-# o1-engineer
+# 🛠️ o1-engineer
 
 A command-line tool designed to assist developers in managing and interacting with their projects efficiently. Leveraging the power of OpenAI's API, o1-engineer provides functionalities such as code generation, file editing, and project planning to streamline your development workflow.
 
-## Features
+## ✨ Features
 
 - **Automated Code Generation**: Generate code for your projects effortlessly.
 
@@ -16,7 +16,7 @@ A command-line tool designed to assist developers in managing and interacting wi
 
 - **Conversation History**: Save and reset conversation histories as needed.
 
-## Installation
+## 📥 Installation
 
 ### Prerequisites
 
@@ -24,30 +24,24 @@ A command-line tool designed to assist developers in managing and interacting wi
 
 - **OpenAI API Key**: Obtain an API key from [OpenAI](https://platform.openai.com/).
 
-### Steps
+### 🔧 Steps
 
 1. **Clone the Repository**:
 
    ```bash
-
    git clone https://github.com/yourusername/o1-engineer.git
-
    ```
 
 2. **Navigate to the Project Directory**:
 
    ```bash
-
    cd o1-engineer
-
    ```
 
 3. **Install Dependencies**:
 
    ```bash
-
    pip install -r requirements.txt
-
    ```
 
 4. **Configure APIs**:
@@ -55,22 +49,18 @@ A command-line tool designed to assist developers in managing and interacting wi
    Add your API at the top of the script
 
    ```
-
    client = OpenAI(api_key="YOUR API")
-
    ```
 
-## Usage
+## 📚 Usage
 
 Launch the application using the following command:
 
 ```bash
-
 python o1-eng.py
-
 ```
 
-### Available Commands
+### 🎮 Available Commands
 
 - `exit`: Quit the application.
 
@@ -84,17 +74,15 @@ python o1-eng.py
 
 - `planning`: Enter the planning mode to create detailed project plans.
 
-### Example
+### 📝 Example
 
 ```bash
-
 You: /add src/main.py src/utils/helper.py
 
 You: write a professional README.md for this project
-
 ```
 
-## Contributing
+## 🤝 Contributing
 
 We welcome contributions! Please follow these steps:
 
@@ -108,12 +96,7 @@ We welcome contributions! Please follow these steps:
 
 5. Open a pull request.
 
-## License
 
-This project is licensed under the MIT License.
-
-## Acknowledgments
+## 🙏 Acknowledgments
 
 - OpenAI for providing the powerful API.
-
-- Contributors and the open-source community for their valuable resources.
