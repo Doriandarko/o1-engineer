@@ -3,3 +3,4 @@ prompt_toolkit
 rich
 PyYAML
 python-dotenv
+fuzzywuzzy
