@@ -29,7 +29,7 @@ A command-line tool designed to assist developers in managing and interacting wi
 1. **Clone the Repository**:
 
    ```bash
-   git clone https://github.com/yourusername/o1-engineer.git
+   git clone https://github.com/doriandarko/o1-engineer.git
    ```
 
 2. **Navigate to the Project Directory**:
