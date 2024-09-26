@@ -34,14 +34,6 @@ console = Console()
 # Load environment variables from .env file
 load_dotenv()  # Ensure this is called before accessing environment variables
 
-# Set up OpenAI client securely using environment variables
-# It's highly recommended **NOT** to hard-code your API key.
-# Instead, store it in the .env file and access it using os.getenv.
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    console.print("[red]OpenAI API key not found in environment variables.[/red]")
-    sys.exit(1)
-
 client = OpenAI(api_key="YOUR KEY")
 
 # Set the model as a variable at the top of the script
