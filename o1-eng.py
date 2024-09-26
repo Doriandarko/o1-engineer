@@ -20,7 +20,6 @@ import shutil
 import difflib
 from fuzzywuzzy import fuzz
 
-
 def load_yaml(yaml_content):
     try:
         return yaml.load(yaml_content, Loader=yaml.FullLoader)
@@ -34,7 +33,7 @@ console = Console()
 # Load environment variables from .env file
 load_dotenv()  # Ensure this is called before accessing environment variables
 
-client = OpenAI(api_key="YOUR KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Set the model as a variable at the top of the script
 MainModel = "o1-mini"
