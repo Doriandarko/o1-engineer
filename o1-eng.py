@@ -210,7 +210,7 @@ def apply_modifications(modifications_json, retry_count=0):
                 return apply_modifications(new_json, retry_count + 1)
             else:
                 print(colored("Error: Invalid JSON structure. 'modifications' key not found after multiple attempts.", "red"))
-                return
+                return False
 
         successful_edits = 0
         total_edits = sum(len(file_mod.get("modifications", [])) for file_mod in modifications_data["modifications"])
@@ -264,8 +264,10 @@ def apply_modifications(modifications_json, retry_count=0):
 
         if successful_edits == total_edits:
             print(colored(f"All {successful_edits} edits were successful!", "green"))
+            return True
         else:
             print(colored(f"{successful_edits} out of {total_edits} edits were successful.", "yellow"))
+            return False
 
     except json.JSONDecodeError as e:
         if retry_count < 3:
@@ -277,8 +279,10 @@ def apply_modifications(modifications_json, retry_count=0):
             print(colored(f"Invalid JSON format after multiple attempts: {e}", "red"))
             print("JSON that failed to parse:")
             print(modifications_json)
+            return False
     except Exception as e:
         print(colored(f"An error occurred: {e}", "red"))
+        return False
 
 def apply_creation_steps(creation_json, retry_count=0):
     try:
@@ -319,6 +323,8 @@ def apply_creation_steps(creation_json, retry_count=0):
             else:
                 print(colored(f"Unknown creation type: {creation_type} for {name}", "red"))
     
+        return True
+
     except json.JSONDecodeError as e:
         if retry_count < 3:
             print(colored(f"Invalid JSON format. Retrying... (Attempt {retry_count + 1})", "yellow"))
@@ -329,8 +335,10 @@ def apply_creation_steps(creation_json, retry_count=0):
             print(colored(f"Invalid JSON format after multiple attempts: {e}", "red"))
             print("JSON that failed to parse:")
             print(creation_json)
+            return False
     except Exception as e:
         print(colored(f"An error occurred: {e}", "red"))
+        return False
 
 def main():
     print("Welcome to the AI File Editor. Type '/edit' followed by file paths to edit files, '/create' followed by creation instructions, '/add' to add files to context, or '/quit' to exit.")
@@ -397,14 +405,23 @@ Files to modify:
             ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
 
             if ai_response:
-                print("AI Assistant: Here are the suggested modifications:")
-                rprint(Markdown(ai_response))
+                while True:
+                    print("AI Assistant: Here are the suggested modifications:")
+                    rprint(Markdown(ai_response))
 
-                confirm = prompt("Do you want to apply these modifications? (yes/no): ", style=style).strip().lower()
-                if confirm == 'yes':
-                    apply_modifications(ai_response)
-                else:
-                    print(colored("Modifications not applied.", "yellow"))
+                    confirm = prompt("Do you want to apply these modifications? (yes/no): ", style=style).strip().lower()
+                    if confirm == 'yes':
+                        success = apply_modifications(ai_response)
+                        if success:
+                            break
+                        else:
+                            retry = prompt("Modifications failed. Do you want the AI to try again? (yes/no): ", style=style).strip().lower()
+                            if retry != 'yes':
+                                break
+                            ai_response = chat_with_ai("The previous modifications failed. Please try again with a different approach.", is_edit_request=True, added_files=added_files)
+                    else:
+                        print(colored("Modifications not applied.", "yellow"))
+                        break
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
@@ -416,14 +433,23 @@ Files to modify:
             ai_response = chat_with_ai(create_request, is_edit_request=True, added_files=added_files)
             
             if ai_response:
-                print("AI Assistant: Here is the suggested creation structure:")
-                rprint(Markdown(ai_response))
+                while True:
+                    print("AI Assistant: Here is the suggested creation structure:")
+                    rprint(Markdown(ai_response))
 
-                confirm = prompt("Do you want to execute these creation steps? (yes/no): ", style=style).strip().lower()
-                if confirm == 'yes':
-                    apply_creation_steps(ai_response)
-                else:
-                    print(colored("Creation steps not executed.", "yellow"))
+                    confirm = prompt("Do you want to execute these creation steps? (yes/no): ", style=style).strip().lower()
+                    if confirm == 'yes':
+                        success = apply_creation_steps(ai_response)
+                        if success:
+                            break
+                        else:
+                            retry = prompt("Creation failed. Do you want the AI to try again? (yes/no): ", style=style).strip().lower()
+                            if retry != 'yes':
+                                break
+                            ai_response = chat_with_ai("The previous creation attempt failed. Please try again with a different approach.", is_edit_request=True, added_files=added_files)
+                    else:
+                        print(colored("Creation steps not executed.", "yellow"))
+                        break
 
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
