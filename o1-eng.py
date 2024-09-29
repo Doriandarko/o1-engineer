@@ -168,12 +168,17 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         return None
 
 def apply_modifications(new_content, file_path):
+    if new_content is None:
+        print(colored(f"No changes to apply for {file_path}", "yellow"))
+        return True
+
     try:
         with open(file_path, 'r') as file:
             old_content = file.read()
 
-        # Remove any potential code block markers
-        new_content = re.sub(r'^```\w*\s*|\s*```$', '', new_content.strip())
+        if old_content == new_content:
+            print(colored(f"No changes detected in {file_path}", "yellow"))
+            return True
 
         display_diff(old_content, new_content, file_path)
 
@@ -185,13 +190,13 @@ def apply_modifications(new_content, file_path):
             logging.info(f"Modifications applied to {file_path} successfully.")
             return True
         else:
-            print(colored("Changes not applied.", "yellow"))
+            print(colored(f"Changes not applied to {file_path}.", "yellow"))
             logging.info(f"User chose not to apply changes to {file_path}.")
             return False
 
     except Exception as e:
-        print(colored(f"An error occurred while applying modifications: {e}", "red"))
-        logging.error(f"Error applying modifications: {e}")
+        print(colored(f"An error occurred while applying modifications to {file_path}: {e}", "red"))
+        logging.error(f"Error applying modifications to {file_path}: {e}")
         return False
 
 def display_diff(old_content, new_content, file_path):
@@ -343,35 +348,45 @@ def main():
                 logging.warning("User issued /edit without file paths.")
                 continue
 
+            file_contents = {}
             for file_path in file_paths:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as file:
-                        file_content = file.read()
+                        file_contents[file_path] = file.read()
                 except Exception as e:
                     print(colored(f"Error reading file {file_path}: {e}", "red"))
                     logging.error(f"Error reading file {file_path}: {e}")
                     continue
 
-                edit_instruction = prompt(f"Edit Instruction for {file_path}: ", style=style).strip()
+            if not file_contents:
+                print(colored("No valid files to edit.", "yellow"))
+                continue
 
-                edit_request = f"""User request: {edit_instruction}
+            edit_instruction = prompt(f"Edit Instruction for all files: ", style=style).strip()
 
-File to modify: {file_path}
+            edit_request = f"""User request: {edit_instruction}
 
-Current file content:
-{file_content}
+Files to modify:
+"""
+            for file_path, content in file_contents.items():
+                edit_request += f"\nFile: {file_path}\nContent:\n{content}\n\n"
 
-IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text."""
+            edit_request += "\nIMPORTANT: Your response must contain only the complete, updated content of each modified file. Do not include any explanations or additional text. Provide the full content for each file you modify, even if some files remain unchanged."
 
-                ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
+            ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
 
-                if ai_response:
-                    success = apply_modifications(ai_response, file_path)
+            if ai_response:
+                modified_files = parse_ai_response(ai_response, file_contents.keys())
+                for file_path, new_content in modified_files.items():
+                    success = apply_modifications(new_content, file_path)
                     if not success:
-                        retry = prompt(f"Modifications for {file_path} failed. Do you want the AI to try again? (yes/no): ", style=style).strip().lower()
+                        retry = prompt(f"Modifications for {file_path} failed. Do you want the AI to try again for all files? (yes/no): ", style=style).strip().lower()
                         if retry == 'yes':
-                            ai_response = chat_with_ai(f"The previous modifications for {file_path} were not successful. Please try again with a different approach, providing the complete updated file content.", is_edit_request=True, added_files=added_files)
-                            success = apply_modifications(ai_response, file_path)
+                            ai_response = chat_with_ai(f"The previous modifications were not fully successful. Please try again with a different approach, providing the complete updated content for all files.", is_edit_request=True, added_files=added_files)
+                            modified_files = parse_ai_response(ai_response, file_contents.keys())
+                            for file_path, new_content in modified_files.items():
+                                apply_modifications(new_content, file_path)
+                        break
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
@@ -410,6 +425,30 @@ IMPORTANT: Your response must contain only the complete, updated content of the 
                 print(colored("AI Assistant:", "blue"))
                 rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
+
+def parse_ai_response(response, original_files):
+    modified_files = {}
+    current_file = None
+    current_content = []
+
+    for line in response.split('\n'):
+        if line.startswith("File: "):
+            if current_file and current_content:
+                modified_files[current_file] = '\n'.join(current_content)
+            current_file = line[6:].strip()
+            current_content = []
+        elif current_file:
+            current_content.append(line)
+
+    if current_file and current_content:
+        modified_files[current_file] = '\n'.join(current_content)
+
+    # Add any original files that weren't modified
+    for file in original_files:
+        if file not in modified_files:
+            modified_files[file] = None
+
+    return modified_files
 
 if __name__ == "__main__":
     main()
