@@ -27,7 +27,7 @@ When given a user request and one or more files, perform the following steps:
 IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations, additional text, or code block markers (such as ```html or ```). The entire response should be valid content for the file being edited.
 
 Example of the expected format:
-
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,6 +45,7 @@ Example of the expected format:
     </script>
 </body>
 </html>
+```
 
 Ensure that your response strictly follows this structure, providing the entire updated file content without any markdown or code block formatting."""
 
@@ -102,6 +103,10 @@ console.log('Hello, World!');
 
 Ensure that each file and folder is correctly specified to facilitate seamless creation by the script."""
 
+# Add this near the top of the file, with other global variables
+last_ai_response = None
+conversation_history = []
+
 def is_binary_file(file_path):
     """Check if a file is binary."""
     try:
@@ -133,13 +138,20 @@ def add_file_to_context(file_path, added_files):
         logging.error(f"Error reading file {file_path}: {e}")
 
 def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
+    global last_ai_response, conversation_history
     try:
-        # Include added file contents in the user message
+        # Include added file contents and conversation history in the user message
         if added_files:
             file_context = "Added files:\n"
             for file_path, content in added_files.items():
                 file_context += f"File: {file_path}\nContent:\n{content}\n\n"
             user_message = f"{file_context}\n{user_message}"
+
+        # Include conversation history
+        if not is_edit_request:
+            history = "\n".join([f"User: {msg}" if i % 2 == 0 else f"AI: {msg}" for i, msg in enumerate(conversation_history)])
+            if history:
+                user_message = f"{history}\nUser: {user_message}"
 
         messages = [
             {
@@ -161,7 +173,16 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             max_completion_tokens=60000  
         )
         logging.info("Received response from AI.")
-        return response.choices[0].message.content
+        last_ai_response = response.choices[0].message.content
+
+        if not is_edit_request:
+            # Update conversation history
+            conversation_history.append(user_message)
+            conversation_history.append(last_ai_response)
+            if len(conversation_history) > 20:  # 10 interactions (user + AI each)
+                conversation_history = conversation_history[-20:]
+
+        return last_ai_response
     except Exception as e:
         print(colored(f"Error while communicating with OpenAI: {e}", "red"))
         logging.error(f"Error while communicating with OpenAI: {e}")
@@ -175,6 +196,10 @@ def apply_modifications(new_content, file_path):
     try:
         with open(file_path, 'r') as file:
             old_content = file.read()
+
+        # Remove any leading/trailing whitespace and newlines
+        new_content = new_content.strip()
+        old_content = old_content.strip()
 
         if old_content == new_content:
             print(colored(f"No changes detected in {file_path}", "yellow"))
@@ -214,7 +239,7 @@ def display_diff(old_content, new_content, file_path):
         return
 
     print(f"\nDiff for {file_path}:")
-    
+
     markdown_diff = "```diff\n"
     for line in diff:
         if line.startswith('+'):
@@ -298,11 +323,13 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
         return False
 
 def main():
+    global last_ai_response, conversation_history
     print(colored("AI File Editor is ready to help you.", "cyan"))
     print("\nAvailable commands:")
     print(f"{colored('/edit', 'magenta'):<10} {colored('Edit files (followed by file paths)', 'dark_grey')}")
     print(f"{colored('/create', 'magenta'):<10} {colored('Create files or folders (followed by instructions)', 'dark_grey')}")
     print(f"{colored('/add', 'magenta'):<10} {colored('Add files to context', 'dark_grey')}")
+    print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
@@ -313,7 +340,7 @@ def main():
     files = [f for f in os.listdir('.') if os.path.isfile(f)]
 
     # Create a WordCompleter with available commands and files
-    completer = WordCompleter(['/edit', '/create', '/add', '/quit'] + files, ignore_case=True)
+    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug'] + files, ignore_case=True)
 
     added_files = {}
 
@@ -325,6 +352,13 @@ def main():
             print("Goodbye!")
             logging.info("User exited the program.")
             break
+
+        elif user_input.lower() == '/debug':
+            if last_ai_response:
+                print(colored("Last AI Response:", "blue"))
+                print(last_ai_response)
+            else:
+                print(colored("No AI response available yet.", "yellow"))
 
         elif user_input.startswith('/add'):
             file_paths = user_input.split()[1:]
@@ -431,17 +465,23 @@ def parse_ai_response(response, original_files):
     current_file = None
     current_content = []
 
-    for line in response.split('\n'):
-        if line.startswith("File: "):
-            if current_file and current_content:
-                modified_files[current_file] = '\n'.join(current_content)
-            current_file = line[6:].strip()
-            current_content = []
-        elif current_file:
-            current_content.append(line)
+    lines = response.split('\n')
+    
+    # Check if the response is a single file content without "File: " prefix
+    if len(original_files) == 1 and not lines[0].startswith("File: "):
+        modified_files[list(original_files)[0]] = response
+    else:
+        for line in lines:
+            if line.startswith("File: "):
+                if current_file and current_content:
+                    modified_files[current_file] = '\n'.join(current_content)
+                current_file = line[6:].strip()
+                current_content = []
+            elif current_file:
+                current_content.append(line)
 
-    if current_file and current_content:
-        modified_files[current_file] = '\n'.join(current_content)
+        if current_file and current_content:
+            modified_files[current_file] = '\n'.join(current_content)
 
     # Add any original files that weren't modified
     for file in original_files:
