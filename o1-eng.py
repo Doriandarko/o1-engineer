@@ -13,7 +13,7 @@ import difflib
 import re
 
 # Initialize OpenAI client
-client = OpenAI(api_key="YOUR KEY")
+client = OpenAI(api_key="YORU KEY")
 
 # System prompt to be included with edit requests
 SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instructions. Your primary objective is to provide a complete, updated version of the file that incorporates the requested changes.
@@ -57,7 +57,7 @@ When given a user request, perform the following steps:
 1. Understand the User Request: Carefully interpret what the user wants to create.
 2. Generate Creation Instructions: Provide the content for each file to be created within appropriate code blocks. Each code block should begin with a special comment line that specifies whether it's a file or folder, along with its path.
 
-IMPORTANT: Your response must ONLY contain the code blocks with no additional text before or after. Do not use markdown formatting outside of the code blocks. Use the following format for the special comment line:
+IMPORTANT: Your response must ONLY contain the code blocks with no additional text before or after. Do not use markdown formatting outside of the code blocks. Use the following format for the special comment line. Do not include any explanations, additional text:
 
 For folders:
 ```
@@ -330,6 +330,7 @@ def main():
     print(f"{colored('/create', 'magenta'):<10} {colored('Create files or folders (followed by instructions)', 'dark_grey')}")
     print(f"{colored('/add', 'magenta'):<10} {colored('Add files to context', 'dark_grey')}")
     print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
+    print(f"{colored('/reset', 'magenta'):<10} {colored('Reset chat context and clear added files', 'dark_grey')}")
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
@@ -340,7 +341,7 @@ def main():
     files = [f for f in os.listdir('.') if os.path.isfile(f)]
 
     # Create a WordCompleter with available commands and files
-    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug'] + files, ignore_case=True)
+    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug', '/reset'] + files, ignore_case=True)
 
     added_files = {}
 
@@ -359,6 +360,13 @@ def main():
                 print(last_ai_response)
             else:
                 print(colored("No AI response available yet.", "yellow"))
+
+        elif user_input.lower() == '/reset':
+            conversation_history = []
+            added_files.clear()
+            last_ai_response = None
+            print(colored("Chat context and added files have been reset.", "green"))
+            logging.info("Chat context and added files have been reset by the user.")
 
         elif user_input.startswith('/add'):
             file_paths = user_input.split()[1:]
