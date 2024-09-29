@@ -12,42 +12,55 @@ from rich.console import Console
 import difflib
 import re
 
+
+MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YORU KEY")
+client = OpenAI(api_key="YOUR KEY")
 
 # System prompt to be included with edit requests
-SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instructions. Your primary objective is to provide a complete, updated version of the file that incorporates the requested changes.
+SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instruction BY REWRITING THE ENTIRE NEW FILE WITH NO PARTS MISSING. Your primary objective is to provide a complete, updated version of the file that incorporates the requested changes.
 
 When given a user request and one or more files, perform the following steps:
 
 1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
 2. Analyze the File: Review the entire content of the provided file.
 3. Generate a Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes to address the user's request.
+4. Add a special comment line at the beginning of the response, indicating the file path and the language of the file.
 
-IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations, additional text, or code block markers (such as ```html or ```). The entire response should be valid content for the file being edited.
+IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations, additional text. The entire response should be valid content for the file being edited.
+
+```language
+### FILE: path/to/file.extension (the special comment line)
+Complete file content goes here...
+```
 
 Example of the expected format:
+
 ```html
+### FILE: index.html
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Updated Snake Game</title>
-    <style>
-        /* CSS styles here */
-    </style>
+    <title>Updated Page</title>
 </head>
 <body>
-    <!-- HTML content here -->
-    <script>
-        // JavaScript code here
-    </script>
+    <h1>Modified Content</h1>
 </body>
 </html>
 ```
 
-Ensure that your response strictly follows this structure, providing the entire updated file content without any markdown or code block formatting."""
+```css
+### FILE: styles.css
+/* No changes needed in this file */
+body {
+    font-family: Arial, sans-serif;
+}
+```
+
+IMPORTANTLY: If no change is required for a file, DO NOT RETURN anything for that file. Only return the correct response format for the file or files that need changes.
+
+
+Ensure that your response contains all files from the original request, using the exact same paths provided."""
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
 CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
@@ -102,6 +115,23 @@ console.log('Hello, World!');
 ```
 
 Ensure that each file and folder is correctly specified to facilitate seamless creation by the script."""
+
+
+CODE_REVIEW_PROMPT = """You are an expert code reviewer. Your task is to analyze the provided code files and provide a comprehensive code review. For each file, consider:
+
+1. Code Quality: Assess readability, maintainability, and adherence to best practices
+2. Potential Issues: Identify bugs, security vulnerabilities, or performance concerns
+3. Suggestions: Provide specific recommendations for improvements
+
+Format your review as follows:
+1. Start with a brief overview of all files
+2. For each file, provide:
+   - A summary of the file's purpose
+   - Key findings (both positive and negative)
+   - Specific recommendations
+3. End with any overall suggestions for the codebase
+
+Your review should be detailed but concise, focusing on the most important aspects of the code."""
 
 # Add this near the top of the file, with other global variables
 last_ai_response = None
@@ -168,7 +198,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             logging.info("Sending general query to AI.")
 
         response = client.chat.completions.create(
-            model="o1-mini",
+            model=MODEL,
             messages=messages,
             max_completion_tokens=60000  
         )
@@ -324,6 +354,9 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
 
 def main():
     global last_ai_response, conversation_history
+
+    
+
     print(colored("AI File Editor is ready to help you.", "cyan"))
     print("\nAvailable commands:")
     print(f"{colored('/edit', 'magenta'):<10} {colored('Edit files (followed by file paths)', 'dark_grey')}")
@@ -331,6 +364,7 @@ def main():
     print(f"{colored('/add', 'magenta'):<10} {colored('Add files to context', 'dark_grey')}")
     print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
     print(f"{colored('/reset', 'magenta'):<10} {colored('Reset chat context and clear added files', 'dark_grey')}")
+    print(f"{colored('/review', 'magenta'):<10} {colored('Review code files (followed by file paths)', 'dark_grey')}")
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
@@ -341,7 +375,7 @@ def main():
     files = [f for f in os.listdir('.') if os.path.isfile(f)]
 
     # Create a WordCompleter with available commands and files
-    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug', '/reset'] + files, ignore_case=True)
+    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug', '/reset', '/review'] + files, ignore_case=True)
 
     added_files = {}
 
@@ -416,19 +450,27 @@ Files to modify:
             edit_request += "\nIMPORTANT: Your response must contain only the complete, updated content of each modified file. Do not include any explanations or additional text. Provide the full content for each file you modify, even if some files remain unchanged."
 
             ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
-
+            
             if ai_response:
                 modified_files = parse_ai_response(ai_response, file_contents.keys())
+                all_successful = True
+                
                 for file_path, new_content in modified_files.items():
-                    success = apply_modifications(new_content, file_path)
-                    if not success:
-                        retry = prompt(f"Modifications for {file_path} failed. Do you want the AI to try again for all files? (yes/no): ", style=style).strip().lower()
-                        if retry == 'yes':
-                            ai_response = chat_with_ai(f"The previous modifications were not fully successful. Please try again with a different approach, providing the complete updated content for all files.", is_edit_request=True, added_files=added_files)
+                    if new_content is not None:  # Only attempt to modify files with new content
+                        success = apply_modifications(new_content, file_path)
+                        if not success:
+                            all_successful = False
+                            print(colored(f"Failed to apply modifications to {file_path}", "red"))
+                
+                if not all_successful:
+                    retry = prompt("Some modifications failed. Do you want the AI to try again for all files? (yes/no): ", style=style).strip().lower()
+                    if retry == 'yes':
+                        ai_response = chat_with_ai(f"The previous modifications were not fully successful. Please try again with a different approach, providing the complete updated content for all files.", is_edit_request=True, added_files=added_files)
+                        if ai_response:
                             modified_files = parse_ai_response(ai_response, file_contents.keys())
                             for file_path, new_content in modified_files.items():
-                                apply_modifications(new_content, file_path)
-                        break
+                                if new_content is not None:
+                                    apply_modifications(new_content, file_path)
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
@@ -460,6 +502,40 @@ Files to modify:
                         logging.info("User chose not to execute creation steps.")
                         break
 
+        elif user_input.startswith('/review'):
+            file_paths = user_input.split()[1:]
+            if not file_paths:
+                print(colored("Please provide at least one file path to review.", "yellow"))
+                logging.warning("User issued /review without file paths.")
+                continue
+
+            file_contents = {}
+            for file_path in file_paths:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        file_contents[file_path] = file.read()
+                except Exception as e:
+                    print(colored(f"Error reading file {file_path}: {e}", "red"))
+                    logging.error(f"Error reading file {file_path}: {e}")
+                    continue
+
+            if not file_contents:
+                print(colored("No valid files to review.", "yellow"))
+                continue
+
+            review_request = f"{CODE_REVIEW_PROMPT}\n\nFiles to review:\n"
+            for file_path, content in file_contents.items():
+                review_request += f"\nFile: {file_path}\nContent:\n{content}\n\n"
+
+            print(colored("Analyzing code and generating review...", "magenta"))
+            ai_response = chat_with_ai(review_request, is_edit_request=False, added_files=added_files)
+            
+            if ai_response:
+                print()
+                print(colored("Code Review:", "blue"))
+                rprint(Markdown(ai_response))
+                logging.info("Provided code review for requested files.")
+
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
             if ai_response:
@@ -469,33 +545,32 @@ Files to modify:
                 logging.info("Provided AI response to user query.")
 
 def parse_ai_response(response, original_files):
-    modified_files = {}
-    current_file = None
-    current_content = []
-
-    lines = response.split('\n')
+    modified_files = {file: None for file in original_files}  # Initialize with None for all original files
     
-    # Check if the response is a single file content without "File: " prefix
-    if len(original_files) == 1 and not lines[0].startswith("File: "):
-        modified_files[list(original_files)[0]] = response
-    else:
-        for line in lines:
-            if line.startswith("File: "):
-                if current_file and current_content:
-                    modified_files[current_file] = '\n'.join(current_content)
-                current_file = line[6:].strip()
-                current_content = []
-            elif current_file:
-                current_content.append(line)
-
-        if current_file and current_content:
-            modified_files[current_file] = '\n'.join(current_content)
-
-    # Add any original files that weren't modified
-    for file in original_files:
-        if file not in modified_files:
-            modified_files[file] = None
-
+    # Extract code blocks
+    code_blocks = re.findall(r'```(?:\w+)?\s*([\s\S]*?)```', response)
+    
+    if not code_blocks:
+        # If no code blocks found, treat the entire response as a single file content
+        code_blocks = [response]
+    
+    for block in code_blocks:
+        # Extract file path and content
+        file_match = re.match(r'### FILE: (.+?)\n([\s\S]*)', block.strip(), re.DOTALL)
+        if file_match:
+            file_path, content = file_match.groups()
+            file_path = file_path.strip()
+            content = content.strip()
+            
+            # Only store content for files that were in the original request
+            if file_path in original_files:
+                modified_files[file_path] = content
+        else:
+            # If no file indicator found, assume it's for the first file in original_files
+            if len(original_files) == 1:
+                only_file = next(iter(original_files))
+                modified_files[only_file] = block.strip()
+    
     return modified_files
 
 if __name__ == "__main__":
