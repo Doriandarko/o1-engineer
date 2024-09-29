@@ -12,8 +12,6 @@ A command-line tool designed to assist developers in managing and interacting wi
 
 - **Interactive Console**: User-friendly interface with rich text support for enhanced readability.
 
-- **Cost Tracking**: Monitor the usage and costs associated with API calls.
-
 - **Conversation History**: Save and reset conversation histories as needed.
 
 ## 📥 Installation
@@ -62,24 +60,21 @@ python o1-eng.py
 
 ### 🎮 Available Commands
 
-- `exit`: Quit the application.
+- `/edit`: Edit files (followed by file paths)
+- `/create`: Create files or folders (followed by instructions)
+- `/add`: Add files to context (followed by file paths)
+- `/debug`: Print the last AI response
+- `/reset`: Reset chat context and clear added files
+- `/review`: Review code files (followed by file paths)
+- `/quit`: Exit the program
 
-- `reset`: Clear the conversation history.
-
-- `save`: Save the current conversation history to a Markdown file.
-
-- `/add file1 [file2 ...]`: Add specified files to the conversation context.
-
-- `/edit file1 [file2 ...]`: Edit specified files based on AI suggestions.
-
-- `planning`: Enter the planning mode to create detailed project plans.
 
 ### 📝 Example
 
 ```bash
 You: /add src/main.py src/utils/helper.py
 
-You: write a professional README.md for this project
+You: /create write a professional README.md for this project
 ```
 
 ## 🤝 Contributing
@@ -100,4 +95,3 @@ We welcome contributions! Please follow these steps:
 ## 🙏 Acknowledgments
 
 - OpenAI for providing the powerful API.
-
