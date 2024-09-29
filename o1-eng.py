@@ -1,7 +1,5 @@
 import os
-import json
 import logging
-import re
 import time
 from openai import OpenAI
 from termcolor import colored
@@ -11,70 +9,44 @@ from prompt_toolkit.completion import WordCompleter
 from rich import print as rprint
 from rich.markdown import Markdown
 from rich.console import Console
-from rich.text import Text
-from rich.syntax import Syntax
 import difflib
-from fuzzywuzzy import fuzz  # Add this import for fuzzy matching
-
+import re
 
 # Initialize OpenAI client
 client = OpenAI(api_key="YOUR KEY")
 
 # System prompt to be included with edit requests
-SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instructions. Your primary objective is to identify the specific sections within one or multiple provided files that need to be updated or changed, regardless of the file size. 
+SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instructions. Your primary objective is to provide a complete, updated version of the file that incorporates the requested changes.
 
 When given a user request and one or more files, perform the following steps:
 
 1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
-2. Analyze the Files: Efficiently parse the provided file(s) to locate the exact parts that are relevant to the user's request.
-3. Generate Modification Instructions: For each identified section that requires changes, provide clear and precise instructions using the following format:
+2. Analyze the File: Review the entire content of the provided file.
+3. Generate a Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes to address the user's request.
 
-<search>
-```language
-# Original code to be replaced
-```
-</search>
-<replace>
-```language
-# New code to replace the original
-```
-</replace>
-
-4. Ensure Clarity and Precision: Your instructions must be unambiguous to allow accurate implementation without additional clarification.
-
-IMPORTANT: Your response must only contain the search and replace blocks as described above, with no additional text before or after. Use the appropriate language identifier in the code blocks (e.g., ```python, ```javascript, etc.).
+IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations, additional text, or code block markers (such as ```html or ```). The entire response should be valid content for the file being edited.
 
 Example of the expected format:
 
-<search>
-```python
-def old_function():
-    print("This is the old implementation")
-```
-</search>
-<replace>
-```python
-def new_function():
-    print("This is the new implementation")
-    print("With an extra line")
-```
-</replace>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updated Snake Game</title>
+    <style>
+        /* CSS styles here */
+    </style>
+</head>
+<body>
+    <!-- HTML content here -->
+    <script>
+        // JavaScript code here
+    </script>
+</body>
+</html>
 
-<search>
-```python
-# Old configuration
-MAX_RETRIES = 3
-```
-</search>
-<replace>
-```python
-# New configuration
-MAX_RETRIES = 5
-TIMEOUT = 30
-```
-</replace>
-
-Ensure that your response strictly follows this structure to facilitate seamless integration with the modification script."""
+Ensure that your response strictly follows this structure, providing the entire updated file content without any markdown or code block formatting."""
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
 CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
@@ -184,9 +156,9 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             logging.info("Sending general query to AI.")
 
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="o1-mini",
             messages=messages,
-            max_tokens=4000
+            max_completion_tokens=60000  
         )
         logging.info("Received response from AI.")
         return response.choices[0].message.content
@@ -195,193 +167,48 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         logging.error(f"Error while communicating with OpenAI: {e}")
         return None
 
-
-def is_potential_json(text):
-    """Check if the text potentially contains JSON."""
-    text = text.strip()
-    return text.startswith('{') and text.endswith('}')
-
-def extract_code_blocks(text):
-    """
-    Extracts all code blocks from the text.
-    Returns a list of tuples: (language, code_content)
-    """
-    # Improved regex to handle optional language and variations in formatting
-    code_block_pattern = r'```(?:\s*(\w+))?\s*\n([\s\S]*?)```'
-    matches = re.findall(code_block_pattern, text, re.MULTILINE)
-    return matches
-
-
-def apply_modifications(modifications_text, retry_count=0):
-    max_retries = 3
-    
-    style = Style.from_dict({
-        'prompt': 'yellow',
-    })
-    
+def apply_modifications(new_content, file_path):
     try:
-        blocks = re.findall(r'<search>[\s\S]*?</search>[\s\S]*?<replace>[\s\S]*?</replace>', modifications_text, re.DOTALL)
-        
-        if not blocks:
-            raise ValueError("No valid search and replace blocks found in the AI response.")
+        with open(file_path, 'r') as file:
+            old_content = file.read()
 
-        logging.info(f"Found {len(blocks)} modification blocks.")
+        # Remove any potential code block markers
+        new_content = re.sub(r'^```\w*\s*|\s*```$', '', new_content.strip())
 
-        successful_edits = 0
-        total_edits = len(blocks)
+        display_diff(old_content, new_content, file_path)
 
-        console = Console()  # For displaying diffs
-
-        for block in blocks:
-            search_match = re.search(r'<search>\s*(```[\s\S]*?```)\s*</search>', block, re.DOTALL)
-            replace_match = re.search(r'<replace>\s*(```[\s\S]*?```)\s*</replace>', block, re.DOTALL)
-
-            if not search_match or not replace_match:
-                logging.warning("Invalid search or replace block found. Skipping.")
-                continue
-
-            search_code = extract_code_from_block(search_match.group(1))
-            replace_code = extract_code_from_block(replace_match.group(1))
-
-            if not search_code or not replace_code:
-                logging.warning("Empty search or replace block found. Skipping.")
-                continue
-
-            matching_files = find_files_with_code(search_code)
-
-            if not matching_files:
-                print(colored(f"No exact matches found. Trying fuzzy search...", "yellow"))
-                matching_files = find_files_with_fuzzy_match(search_code)
-
-            if not matching_files:
-                print(colored(f"No files found containing the search code.", "yellow"))
-                logging.warning(f"No files found containing the search code.")
-                continue
-
-            for file_path in matching_files:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        content = file.read()
-
-                    new_content = fuzzy_replace(content, search_code, replace_code)
-
-                    if new_content == content:
-                        print(colored(f"No changes needed in {file_path}", "yellow"))
-                        logging.info(f"No changes needed in {file_path}")
-                        continue
-
-                    display_diff(content, new_content, file_path, console)
-
-                    confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=style).strip().lower()
-                    if confirm == 'yes':
-                        with open(file_path, 'w', encoding='utf-8') as file:
-                            file.write(new_content)
-                        print(colored(f"Modifications applied to {file_path} successfully.", "green"))
-                        logging.info(f"Modifications applied to {file_path} successfully.")
-                        successful_edits += 1
-                    else:
-                        print(colored("Changes not applied.", "yellow"))
-                        logging.info(f"User chose not to apply changes to {file_path}.")
-
-                except Exception as e:
-                    print(colored(f"Error processing file {file_path}: {e}", "red"))
-                    logging.error(f"Error processing file {file_path}: {e}")
-
-        if successful_edits == total_edits:
-            print(colored(f"All {successful_edits} edits were successful!", "green"))
-            logging.info(f"All {successful_edits} edits were successful.")
+        confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=Style.from_dict({'prompt': 'yellow'})).strip().lower()
+        if confirm == 'yes':
+            with open(file_path, 'w') as file:
+                file.write(new_content)
+            print(colored(f"Modifications applied to {file_path} successfully.", "green"))
+            logging.info(f"Modifications applied to {file_path} successfully.")
             return True
         else:
-            print(colored(f"{successful_edits} out of {total_edits} edits were successful.", "yellow"))
-            logging.warning(f"{successful_edits} out of {total_edits} edits were successful.")
+            print(colored("Changes not applied.", "yellow"))
+            logging.info(f"User chose not to apply changes to {file_path}.")
             return False
 
-    except ValueError as e:
-        if retry_count < max_retries:
-            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "yellow"))
-            logging.warning(f"Modification parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
-            error_message = f"{str(e)} Please provide the modifications again using the specified format with <search> and <replace> blocks."
-            time.sleep(2 ** retry_count)  # Exponential backoff
-            new_modifications = chat_with_ai(error_message, is_edit_request=True)
-            if new_modifications:
-                return apply_modifications(new_modifications, retry_count + 1)
-            else:
-                return False
-        else:
-            print(colored(f"Failed to parse modifications after multiple attempts: {str(e)}", "red"))
-            logging.error(f"Failed to parse modifications after multiple attempts: {str(e)}")
-            print("Modifications that failed to parse:")
-            print(modifications_text)
-            return False
     except Exception as e:
-        print(colored(f"An unexpected error occurred: {e}", "red"))
-        logging.error(f"An unexpected error occurred: {e}")
+        print(colored(f"An error occurred while applying modifications: {e}", "red"))
+        logging.error(f"Error applying modifications: {e}")
         return False
 
-def extract_code_from_block(block):
-    match = re.search(r'```(?:\w+)?\s*([\s\S]*?)\s*```', block)
-    if match:
-        return match.group(1).strip()
-    else:
-        logging.warning(f"Failed to extract code from block: {block}")
-        return None
-
-def find_files_with_code(search_code):
-    matching_files = []
-    for root, dirs, files in os.walk('.'):
-        for file in files:
-            if file.endswith(('.py', '.js', '.html', '.css')):  # Add more extensions if needed
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        if search_code in content:
-                            matching_files.append(file_path)
-                except Exception as e:
-                    print(colored(f"Error reading file {file_path}: {e}", "red"))
-                    logging.error(f"Error reading file {file_path}: {e}")
-    return matching_files
-
-def find_files_with_fuzzy_match(search_code, threshold=80):
-    matching_files = []
-    for root, dirs, files in os.walk('.'):
-        for file in files:
-            if file.endswith(('.py', '.js', '.html', '.css')):  # Add more extensions if needed
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        if fuzz.partial_ratio(search_code, content) >= threshold:
-                            matching_files.append(file_path)
-                except Exception as e:
-                    print(colored(f"Error reading file {file_path}: {e}", "red"))
-                    logging.error(f"Error reading file {file_path}: {e}")
-    return matching_files
-
-def fuzzy_replace(content, search_code, replace_code):
-    lines = content.splitlines()
-    new_lines = []
-    i = 0
-    while i < len(lines):
-        if fuzz.partial_ratio(search_code, '\n'.join(lines[i:i+len(search_code.splitlines())])) >= 80:
-            new_lines.extend(replace_code.splitlines())
-            i += len(search_code.splitlines())
-        else:
-            new_lines.append(lines[i])
-            i += 1
-    return '\n'.join(new_lines)
-
-def display_diff(old_content, new_content, file_path, console):
-    old_lines = old_content.splitlines()
-    new_lines = new_content.splitlines()
-    
-    diff = list(difflib.unified_diff(old_lines, new_lines, lineterm='', n=5))
+def display_diff(old_content, new_content, file_path):
+    diff = list(difflib.unified_diff(
+        old_content.splitlines(keepends=True),
+        new_content.splitlines(keepends=True),
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+        lineterm='',
+        n=5
+    ))
     
     if not diff:
-        console.print(f"No changes detected in {file_path}")
+        print(f"No changes detected in {file_path}")
         return
 
-    console.print(f"\nDiff for {file_path}:")
+    print(f"\nDiff for {file_path}:")
     
     markdown_diff = "```diff\n"
     for line in diff:
@@ -395,19 +222,20 @@ def display_diff(old_content, new_content, file_path, console):
             markdown_diff += " " + line + "\n"
     markdown_diff += "```"
 
+    console = Console()
     console.print(Markdown(markdown_diff))
 
 def apply_creation_steps(creation_response, added_files, retry_count=0):
     max_retries = 3
     try:
-        code_blocks = extract_code_blocks(creation_response)
+        code_blocks = re.findall(r'```(?:\w+)?\s*([\s\S]*?)```', creation_response)
         if not code_blocks:
             raise ValueError("No code blocks found in the AI response.")
 
         print("Successfully extracted code blocks:")
         logging.info("Successfully extracted code blocks from creation response.")
 
-        for language, code in code_blocks:
+        for code in code_blocks:
             # Extract file/folder information from the special comment line
             info_match = re.match(r'### (FILE|FOLDER): (.+)', code.strip())
             
@@ -435,10 +263,6 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
                         f.write(file_content)
                     print(colored(f"File created: {path}", "green"))
                     logging.info(f"File created: {path}")
-
-                    # Remove the linting call
-                    # if path.endswith(('.py', '.js', '.jsx', '.ts', '.tsx')):
-                    #     lint_file(path)
             else:
                 print(colored("Error: Could not determine the file or folder information from the code block.", "red"))
                 logging.error("Could not determine the file or folder information from the code block.")
@@ -446,7 +270,7 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
 
         return True
 
-    except (ValueError, re.error) as e:
+    except ValueError as e:
         if retry_count < max_retries:
             print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "yellow"))
             logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
@@ -519,38 +343,35 @@ def main():
                 logging.warning("User issued /edit without file paths.")
                 continue
 
-            file_contents = []
             for file_path in file_paths:
                 try:
                     with open(file_path, 'r', encoding='utf-8') as file:
-                        content = file.read()
-                        file_contents.append(f"File: {file_path}\nContent:\n{content}\n")
+                        file_content = file.read()
                 except Exception as e:
                     print(colored(f"Error reading file {file_path}: {e}", "red"))
                     logging.error(f"Error reading file {file_path}: {e}")
                     continue
 
-            edit_instruction = prompt("Edit Instruction: ", style=style).strip()
+                edit_instruction = prompt(f"Edit Instruction for {file_path}: ", style=style).strip()
 
-            edit_request = f"""User request: {edit_instruction}
+                edit_request = f"""User request: {edit_instruction}
 
-Files to modify: {" ".join(file_contents)}
+File to modify: {file_path}
 
-IMPORTANT: Your response must contain only <search> and <replace> blocks as described in the system prompt. Do not include any other text."""
+Current file content:
+{file_content}
 
-            ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
+IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text."""
 
-            if ai_response:
-                success = apply_modifications(ai_response)
-                if not success:
-                    retry = prompt("Some modifications failed. Do you want to see the AI's response? (yes/no): ", style=style).strip().lower()
-                    if retry == 'yes':
-                        print("AI Response:")
-                        print(ai_response)
-                    retry = prompt("Do you want the AI to try again? (yes/no): ", style=style).strip().lower()
-                    if retry == 'yes':
-                        ai_response = chat_with_ai("The previous modifications were not fully successful. Please try again with a different approach, using only <search> and <replace> blocks.", is_edit_request=True, added_files=added_files)
-                        success = apply_modifications(ai_response)
+                ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
+
+                if ai_response:
+                    success = apply_modifications(ai_response, file_path)
+                    if not success:
+                        retry = prompt(f"Modifications for {file_path} failed. Do you want the AI to try again? (yes/no): ", style=style).strip().lower()
+                        if retry == 'yes':
+                            ai_response = chat_with_ai(f"The previous modifications for {file_path} were not successful. Please try again with a different approach, providing the complete updated file content.", is_edit_request=True, added_files=added_files)
+                            success = apply_modifications(ai_response, file_path)
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
