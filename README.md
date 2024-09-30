@@ -100,7 +100,7 @@ python o1-eng.py
 
 - `/reset`: Reset chat context and clear added files
 
-- `/review`: Review and analyze code files for quality and potential improvements (followed by file paths)
+- `/review`: Review and analyze code files for quality and potential improvements (followed by file or folder paths)
 
 - `/quit`: Exit the program
 
