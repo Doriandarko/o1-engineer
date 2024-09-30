@@ -371,6 +371,69 @@ def apply_edit_instructions(edit_instructions, original_files):
             modified_files[file_path] = content  # No changes for this file
     return modified_files
 
+def guided_create():
+    project_description = prompt("Describe your project idea: ", style=Style.from_dict({'prompt': 'cyan'}))
+    
+    analysis_prompt = f"""
+    Based on the following project description, suggest an appropriate technical stack and project structure. Focus on:
+    1. Frontend framework (e.g., React, Vue, Angular)
+    2. Backend framework (if needed, e.g., Node.js/Express, Django, Flask)
+    3. Database (if needed, e.g., MongoDB, PostgreSQL)
+    4. Additional technologies (e.g., Next.js for SSR, Tailwind for CSS)
+
+    Project description: {project_description}
+
+    Provide a concise recommendation for each point and a brief explanation of why it's suitable for this project.
+    """
+    
+    stack_recommendation = chat_with_ai(analysis_prompt, is_edit_request=False)
+    
+    if stack_recommendation is None:
+        print(colored("Failed to generate stack recommendations. Please try again.", "red"))
+        return
+
+    print("\nRecommended Technical Stack:")
+    rprint(Markdown(stack_recommendation))
+
+    confirm = prompt("Do you want to proceed with this stack? (yes/no): ", style=Style.from_dict({'prompt': 'cyan'})).lower()
+    if confirm != 'yes':
+        print(colored("Project creation cancelled.", "yellow"))
+        return
+
+    creation_prompt = f"""
+    Based on the following project description and recommended stack, create a detailed project structure including main files and folders. Provide the structure in a format that can be easily parsed to create directories and files.
+
+    Project description: {project_description}
+    Recommended stack: {stack_recommendation}
+
+    For each file or folder, use the following format:
+    ```
+    ### FOLDER: path/to/folder
+    ```
+    or
+    ```language
+    ### FILE: path/to/file.extension
+    File content goes here...
+    ```
+
+    Include a brief description of each main file/folder's purpose.
+    """
+
+    project_structure = chat_with_ai(creation_prompt, is_edit_request=False)
+    
+    if project_structure is None:
+        print(colored("Failed to generate project structure. Please try again.", "red"))
+        return
+
+    print("\nProposed Project Structure:")
+    rprint(Markdown(project_structure))
+
+    if prompt("Do you want to create this project structure? (yes/no): ", style=Style.from_dict({'prompt': 'cyan'})).lower() == 'yes':
+        apply_creation_steps(project_structure, {})
+        print(colored("Project has been created!", "green"))
+    else:
+        print(colored("Project creation cancelled.", "yellow"))
+
 def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
     global last_ai_response, conversation_history
     try:
@@ -408,7 +471,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
-            max_completion_tokens=60000
+            max_completion_tokens=16384
         )
         logging.info("Received response from AI.")
         last_ai_response = response.choices[0].message.content
@@ -436,6 +499,7 @@ def main():
     print("\nAvailable commands:")
     print(f"{colored('/edit', 'magenta'):<10} {colored('Edit files or directories (followed by paths)', 'dark_grey')}")
     print(f"{colored('/create', 'magenta'):<10} {colored('Create files or folders (followed by instructions)', 'dark_grey')}")
+    print(f"{colored('/guided-create', 'magenta'):<15} {colored('Start a guided project creation process', 'dark_grey')}")
     print(f"{colored('/add', 'magenta'):<10} {colored('Add files or folders to context', 'dark_grey')}")
     print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
     print(f"{colored('/reset', 'magenta'):<10} {colored('Reset chat context and clear added files', 'dark_grey')}")
@@ -583,6 +647,9 @@ Files to modify:
                         print(colored("Creation steps not executed.", "red"))
                         logging.info("User chose not to execute creation steps.")
                         break
+
+        elif user_input.lower() == '/guided-create':
+            guided_create()
 
         elif user_input.startswith('/review'):
             paths = user_input.split()[1:]
