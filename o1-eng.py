@@ -17,51 +17,6 @@ MODEL = "o1-mini"
 # Initialize OpenAI client
 client = OpenAI(api_key="YOUR KEY")
 
-# System prompt to be included with edit requests
-SYSTEM_PROMPT = """You are an advanced AI assistant designed to analyze and modify large text-based files based on user instruction BY REWRITING THE ENTIRE NEW FILE WITH NO PARTS MISSING. Your primary objective is to provide a complete, updated version of the file that incorporates the requested changes.
-
-When given a user request and one or more files, perform the following steps:
-
-1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
-2. Analyze the File: Review the entire content of the provided file.
-3. Generate a Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes to address the user's request.
-4. Add a special comment line at the beginning of the response, indicating the file path and the language of the file.
-
-IMPORTANT: Your response must contain only the complete, updated content of the file. Do not include any explanations, additional text. The entire response should be valid content for the file being edited.
-
-```language
-### FILE: path/to/file.extension (the special comment line)
-Complete file content goes here...
-```
-
-Example of the expected format:
-
-```html
-### FILE: index.html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Updated Page</title>
-</head>
-<body>
-    <h1>Modified Content</h1>
-</body>
-</html>
-```
-
-```css
-### FILE: styles.css
-/* No changes needed in this file */
-body {
-    font-family: Arial, sans-serif;
-}
-```
-
-IMPORTANTLY: If no change is required for a file, DO NOT RETURN anything for that file. Only return the correct response format for the file or files that need changes.
-
-
-Ensure that your response contains all files from the original request, using the exact same paths provided."""
-
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
 CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
 
@@ -167,6 +122,54 @@ def add_file_to_context(file_path, added_files):
         print(colored(f"Error reading file {file_path}: {e}", "red"))
         logging.error(f"Error reading file {file_path}: {e}")
 
+# Keep the new edit instruction prompts
+EDIT_INSTRUCTION_PROMPT = """You are an advanced AI assistant designed to analyze files and provide edit instructions based on user requests. Your task is to:
+
+1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
+2. Analyze the File(s): Review the content of the provided file(s).
+3. Generate Edit Instructions: Provide clear, step-by-step instructions on how to modify the file(s) to address the user's request.
+
+Your response should be in the following format:
+
+```
+File: [file_path]
+Instructions:
+1. [First edit instruction]
+2. [Second edit instruction]
+...
+
+File: [another_file_path]
+Instructions:
+1. [First edit instruction]
+2. [Second edit instruction]
+...
+```
+
+Only provide instructions for files that need changes. Be specific and clear in your instructions."""
+
+APPLY_EDITS_PROMPT = """You are an advanced AI assistant designed to apply edit instructions to files. Your task is to:
+
+1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
+2. Apply the Changes: Modify the original file content according to the instructions.
+3. Return the Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes
+4. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
+
+Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text."""
+
+def apply_edit_instructions(edit_instructions, original_files):
+    modified_files = {}
+    for file_path, content in original_files.items():
+        if file_path in edit_instructions:
+            instructions = edit_instructions[file_path]
+            prompt = f"{APPLY_EDITS_PROMPT}\n\nOriginal File: {file_path}\nContent:\n{content}\n\nEdit Instructions:\n{instructions}\n\nUpdated File Content:"
+            response = chat_with_ai(prompt, is_edit_request=True)
+            if response:
+                modified_files[file_path] = response.strip()
+        else:
+            modified_files[file_path] = content  # No changes for this file
+    return modified_files
+
+# Update the chat_with_ai function
 def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
     global last_ai_response, conversation_history
     try:
@@ -183,11 +186,15 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             if history:
                 user_message = f"{history}\nUser: {user_message}"
 
+        # Prepare the message content based on the request type
+        if is_edit_request:
+            prompt = EDIT_INSTRUCTION_PROMPT if retry_count == 0 else APPLY_EDITS_PROMPT
+            message_content = f"{prompt}\n\nUser request: {user_message}"
+        else:
+            message_content = user_message
+
         messages = [
-            {
-                "role": "user",
-                "content": (SYSTEM_PROMPT + "\n\nUser request: " + user_message) if is_edit_request else user_message
-            }
+            {"role": "user", "content": message_content}
         ]
         
         if is_edit_request and retry_count == 0:
@@ -200,7 +207,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         response = client.chat.completions.create(
             model=MODEL,
             messages=messages,
-            max_completion_tokens=60000  
+            max_completion_tokens=60000
         )
         logging.info("Received response from AI.")
         last_ai_response = response.choices[0].message.content
@@ -218,20 +225,13 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         logging.error(f"Error while communicating with OpenAI: {e}")
         return None
 
+# Step 5: Update the apply_modifications function
 def apply_modifications(new_content, file_path):
-    if new_content is None:
-        print(colored(f"No changes to apply for {file_path}", "yellow"))
-        return True
-
     try:
         with open(file_path, 'r') as file:
             old_content = file.read()
 
-        # Remove any leading/trailing whitespace and newlines
-        new_content = new_content.strip()
-        old_content = old_content.strip()
-
-        if old_content == new_content:
+        if old_content.strip() == new_content.strip():
             print(colored(f"No changes detected in {file_path}", "yellow"))
             return True
 
@@ -352,6 +352,7 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
         logging.error(f"An unexpected error occurred during creation: {e}")
         return False
 
+# Step 4: Modify the main function
 def main():
     global last_ai_response, conversation_history
 
@@ -447,30 +448,21 @@ Files to modify:
             for file_path, content in file_contents.items():
                 edit_request += f"\nFile: {file_path}\nContent:\n{content}\n\n"
 
-            edit_request += "\nIMPORTANT: Your response must contain only the complete, updated content of each modified file. Do not include any explanations or additional text. Provide the full content for each file you modify, even if some files remain unchanged."
-
             ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
             
             if ai_response:
-                modified_files = parse_ai_response(ai_response, file_contents.keys())
-                all_successful = True
-                
-                for file_path, new_content in modified_files.items():
-                    if new_content is not None:  # Only attempt to modify files with new content
-                        success = apply_modifications(new_content, file_path)
-                        if not success:
-                            all_successful = False
-                            print(colored(f"Failed to apply modifications to {file_path}", "red"))
-                
-                if not all_successful:
-                    retry = prompt("Some modifications failed. Do you want the AI to try again for all files? (yes/no): ", style=style).strip().lower()
-                    if retry == 'yes':
-                        ai_response = chat_with_ai(f"The previous modifications were not fully successful. Please try again with a different approach, providing the complete updated content for all files.", is_edit_request=True, added_files=added_files)
-                        if ai_response:
-                            modified_files = parse_ai_response(ai_response, file_contents.keys())
-                            for file_path, new_content in modified_files.items():
-                                if new_content is not None:
-                                    apply_modifications(new_content, file_path)
+                print("AI Assistant: Here are the suggested edit instructions:")
+                rprint(Markdown(ai_response))
+
+                confirm = prompt("Do you want to apply these edit instructions? (yes/no): ", style=style).strip().lower()
+                if confirm == 'yes':
+                    edit_instructions = parse_edit_instructions(ai_response)
+                    modified_files = apply_edit_instructions(edit_instructions, file_contents)
+                    for file_path, new_content in modified_files.items():
+                        apply_modifications(new_content, file_path)
+                else:
+                    print(colored("Edit instructions not applied.", "yellow"))
+                    logging.info("User chose not to apply edit instructions.")
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
@@ -544,34 +536,25 @@ Files to modify:
                 rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
 
-def parse_ai_response(response, original_files):
-    modified_files = {file: None for file in original_files}  # Initialize with None for all original files
-    
-    # Extract code blocks
-    code_blocks = re.findall(r'```(?:\w+)?\s*([\s\S]*?)```', response)
-    
-    if not code_blocks:
-        # If no code blocks found, treat the entire response as a single file content
-        code_blocks = [response]
-    
-    for block in code_blocks:
-        # Extract file path and content
-        file_match = re.match(r'### FILE: (.+?)\n([\s\S]*)', block.strip(), re.DOTALL)
-        if file_match:
-            file_path, content = file_match.groups()
-            file_path = file_path.strip()
-            content = content.strip()
-            
-            # Only store content for files that were in the original request
-            if file_path in original_files:
-                modified_files[file_path] = content
-        else:
-            # If no file indicator found, assume it's for the first file in original_files
-            if len(original_files) == 1:
-                only_file = next(iter(original_files))
-                modified_files[only_file] = block.strip()
-    
-    return modified_files
+# New function to parse edit instructions
+def parse_edit_instructions(response):
+    instructions = {}
+    current_file = None
+    current_instructions = []
+
+    for line in response.split('\n'):
+        if line.startswith("File: "):
+            if current_file:
+                instructions[current_file] = "\n".join(current_instructions)
+            current_file = line[6:].strip()
+            current_instructions = []
+        elif line.strip() and current_file:
+            current_instructions.append(line.strip())
+
+    if current_file:
+        instructions[current_file] = "\n".join(current_instructions)
+
+    return instructions
 
 if __name__ == "__main__":
     main()
