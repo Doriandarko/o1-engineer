@@ -159,10 +159,11 @@ def should_ignore(file_path, patterns):
             return True
     return False
 
-def add_file_to_context(file_path, added_files):
+def add_file_to_context(file_path, added_files, action='to the chat context'):
+    """Add a file to the given dictionary, applying exclusion rules."""
     excluded_dirs = {'__pycache__', '.git', 'node_modules'}
-    excluded_extensions = {'.exe', '.bin', '.jpg', '.png', '.gif', '.dll'}
-    supported_extensions = {'.py', '.js', '.txt', '.md', '.html', '.css', '.json', '.java', '.c', '.cpp'}
+    excluded_extensions = {'.exe', '.bin', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico', '.svg', '.webp', '.dll', '.so', '.dylib', '.zip', '.tar', '.gz', '.rar', '.7z', '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.wav', '.ogg', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.db', '.sqlite', '.mdb', '.iso', '.dmg', '.apk', '.ipa'}
+    supported_extensions = {'.py', '.js', '.html', '.css', '.java', '.cpp', '.ts', '.jsx', '.php', '.go', '.rb', '.swift', '.kt', '.rs', '.sql'}
 
     # Load .gitignore patterns if in a git repository
     gitignore_patterns = []
@@ -199,11 +200,15 @@ def add_file_to_context(file_path, added_files):
             with open(file_path, 'r', encoding='utf-8') as file:
                 content = file.read()
                 added_files[file_path] = content
-                print(colored(f"Added {file_path} to the chat context.", "green"))
-                logging.info(f"Added {file_path} to the chat context.")
+                print(colored(f"Added {file_path} {action}.", "green"))
+                logging.info(f"Added {file_path} {action}.")
         except Exception as e:
             print(colored(f"Error reading file {file_path}: {e}", "red"))
             logging.error(f"Error reading file {file_path}: {e}")
+    else:
+        print(colored(f"Error: {file_path} is not a file.", "red"))
+        logging.error(f"{file_path} is not a file.")
+
 
 
 def apply_modifications(new_content, file_path):
@@ -580,21 +585,26 @@ Files to modify:
                         break
 
         elif user_input.startswith('/review'):
-            file_paths = user_input.split()[1:]
-            if not file_paths:
-                print(colored("Please provide at least one file path to review.", "red"))
-                logging.warning("User issued /review without file paths.")
+            paths = user_input.split()[1:]
+            if not paths:
+                print(colored("Please provide at least one file or folder path.", "red"))
+                logging.warning("User issued /review without file or folder paths.")
                 continue
 
             file_contents = {}
-            for file_path in file_paths:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        file_contents[file_path] = file.read()
-                except Exception as e:
-                    print(colored(f"Error reading file {file_path}: {e}", "red"))
-                    logging.error(f"Error reading file {file_path}: {e}")
-                    continue
+            for path in paths:
+                if os.path.isfile(path):
+                    add_file_to_context(path, file_contents, action='to review')
+                elif os.path.isdir(path):
+                    for root, dirs, files_in_dir in os.walk(path):
+                        # Skip excluded directories
+                        dirs[:] = [d for d in dirs if d not in {'__pycache__', '.git', 'node_modules'}]
+                        for file in files_in_dir:
+                            file_path = os.path.join(root, file)
+                            add_file_to_context(file_path, file_contents, action='to review')
+                else:
+                    print(colored(f"Error: {path} is neither a file nor a directory.", "red"))
+                    logging.error(f"{path} is neither a file nor a directory.")
 
             if not file_contents:
                 print(colored("No valid files to review.", "red"))
