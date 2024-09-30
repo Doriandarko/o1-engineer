@@ -125,6 +125,10 @@ Your response must contain only the complete, updated content of the file. Do no
 YOU NEVER CREATE DUPLICATE CODE. MAKE SURE YOU DO NOT CREATE DUPLICATE CODE WHEN REWRITING THE NEW FILE"""
 
 
+
+PLANNING_PROMPT = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough."""
+
+
 last_ai_response = None
 conversation_history = []
 
@@ -431,6 +435,7 @@ def main():
     print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
     print(f"{colored('/reset', 'magenta'):<10} {colored('Reset chat context and clear added files', 'dark_grey')}")
     print(f"{colored('/review', 'magenta'):<10} {colored('Review code files (followed by file paths)', 'dark_grey')}")
+    print(f"{colored('/planning', 'magenta'):<10} {colored('Generate a detailed plan based on your request', 'dark_grey')}")
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
@@ -441,7 +446,10 @@ def main():
     files = [f for f in os.listdir('.') if os.path.isfile(f)]
 
     # Create a WordCompleter with available commands and files
-    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug', '/reset', '/review'] + files, ignore_case=True)
+    completer = WordCompleter(
+        ['/edit', '/create', '/add', '/quit', '/debug', '/reset', '/review', '/planning'] + files,
+        ignore_case=True
+    )
 
     added_files = {}
     file_contents = {}
@@ -604,6 +612,23 @@ Files to modify:
                 print(colored("Code Review:", "blue"))
                 rprint(Markdown(ai_response))
                 logging.info("Provided code review for requested files.")
+
+        elif user_input.startswith('/planning'):
+            planning_instruction = user_input[9:].strip()  # Remove '/planning' and leading/trailing whitespace
+            if not planning_instruction:
+                print(colored("Please provide a planning request after /planning.", "red"))
+                logging.warning("User issued /planning without instructions.")
+                continue
+            planning_request = f"{PLANNING_PROMPT}\n\nUser request: {planning_instruction}"
+            ai_response = chat_with_ai(planning_request, is_edit_request=False, added_files=added_files)
+            if ai_response:
+                print()
+                print(colored("o1 engineer: Here is your detailed plan:", "blue"))
+                rprint(Markdown(ai_response))
+                logging.info("Provided planning response to user.")
+            else:
+                print(colored("Failed to generate a planning response. Please try again.", "red"))
+                logging.error("AI failed to generate a planning response.")
 
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
