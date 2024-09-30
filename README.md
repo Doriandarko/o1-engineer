@@ -160,4 +160,4 @@ We welcome contributions! Please follow these steps:
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=o1-engineer/o1-engineer,Doriandarko/o1-engineer&type=Date)](https://star-history.com/#o1-engineer/o1-engineer&Doriandarko/o1-engineer&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Doriandarko/o1-engineer&type=Date)](https://star-history.com/#Doriandarko/o1-engineer&Date)
