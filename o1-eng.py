@@ -15,7 +15,7 @@ import re
 
 MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YOU KEY")
+client = OpenAI(api_key="YOUR KEY")
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
 CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
@@ -72,7 +72,6 @@ console.log('Hello, World!');
 
 Ensure that each file and folder is correctly specified to facilitate seamless creation by the script."""
 
-
 CODE_REVIEW_PROMPT = """You are an expert code reviewer. Your task is to analyze the provided code files and provide a comprehensive code review. For each file, consider:
 
 1. Code Quality: Assess readability, maintainability, and adherence to best practices
@@ -96,7 +95,7 @@ conversation_history = []
 def is_binary_file(file_path):
     """Check if a file is binary."""
     try:
-        with open(file_path, 'tr') as check_file:
+        with open(file_path, 'r') as check_file:
             check_file.read()
         return False
     except UnicodeDecodeError:
@@ -144,6 +143,7 @@ Instructions:
 1. [First edit instruction]
 2. [Second edit instruction]
 ...
+
 ```
 
 Only provide instructions for files that need changes. Be specific and clear in your instructions."""
@@ -233,12 +233,12 @@ def apply_modifications(new_content, file_path):
             old_content = file.read()
 
         if old_content.strip() == new_content.strip():
-            print(colored(f"No changes detected in {file_path}", "yellow"))
+            print(colored(f"No changes detected in {file_path}", "orange"))
             return True
 
         display_diff(old_content, new_content, file_path)
 
-        confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=Style.from_dict({'prompt': 'yellow'})).strip().lower()
+        confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=Style.from_dict({'prompt': 'orange'})).strip().lower()
         if confirm == 'yes':
             with open(file_path, 'w') as file:
                 file.write(new_content)
@@ -246,7 +246,7 @@ def apply_modifications(new_content, file_path):
             logging.info(f"Modifications applied to {file_path} successfully.")
             return True
         else:
-            print(colored(f"Changes not applied to {file_path}.", "yellow"))
+            print(colored(f"Changes not applied to {file_path}.", "orange"))
             logging.info(f"User chose not to apply changes to {file_path}.")
             return False
 
@@ -333,7 +333,7 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
 
     except ValueError as e:
         if retry_count < max_retries:
-            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "yellow"))
+            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "orange"))
             logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
             error_message = f"{str(e)} Please provide the creation instructions again using the specified format."
             time.sleep(2 ** retry_count)  # Exponential backoff
@@ -370,7 +370,7 @@ def main():
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
-        'prompt': 'yellow',
+        'prompt': 'cyan',
     })
 
     # Get the list of files in the current directory
@@ -395,7 +395,7 @@ def main():
                 print(colored("Last AI Response:", "blue"))
                 print(last_ai_response)
             else:
-                print(colored("No AI response available yet.", "yellow"))
+                print(colored("No AI response available yet.", "orange"))
 
         elif user_input.lower() == '/reset':
             conversation_history = []
@@ -407,7 +407,7 @@ def main():
         elif user_input.startswith('/add'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path.", "yellow"))
+                print(colored("Please provide at least one file path.", "orange"))
                 logging.warning("User issued /add without file paths.")
                 continue
 
@@ -416,13 +416,13 @@ def main():
 
             total_size = sum(len(content) for content in added_files.values())
             if total_size > 100000:  # Warning if total content exceeds ~100KB
-                print(colored("Warning: The total size of added files is large and may affect performance.", "yellow"))
+                print(colored("Warning: The total size of added files is large and may affect performance.", "orange"))
                 logging.warning("Total size of added files exceeds 100KB.")
 
         elif user_input.startswith('/edit'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path.", "yellow"))
+                print(colored("Please provide at least one file path.", "orange"))
                 logging.warning("User issued /edit without file paths.")
                 continue
 
@@ -437,7 +437,7 @@ def main():
                     continue
 
             if not file_contents:
-                print(colored("No valid files to edit.", "yellow"))
+                print(colored("No valid files to edit.", "orange"))
                 continue
 
             edit_instruction = prompt(f"Edit Instruction for all files: ", style=style).strip()
@@ -462,13 +462,13 @@ Files to modify:
                     for file_path, new_content in modified_files.items():
                         apply_modifications(new_content, file_path)
                 else:
-                    print(colored("Edit instructions not applied.", "yellow"))
+                    print(colored("Edit instructions not applied.", "orange"))
                     logging.info("User chose not to apply edit instructions.")
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
             if not creation_instruction:
-                print(colored("Please provide creation instructions after /create.", "yellow"))
+                print(colored("Please provide creation instructions after /create.", "orange"))
                 logging.warning("User issued /create without instructions.")
                 continue
 
@@ -491,14 +491,14 @@ Files to modify:
                                 break
                             ai_response = chat_with_ai("The previous creation attempt failed. Please try again with a different approach.", is_edit_request=False, added_files=added_files)
                     else:
-                        print(colored("Creation steps not executed.", "yellow"))
+                        print(colored("Creation steps not executed.", "orange"))
                         logging.info("User chose not to execute creation steps.")
                         break
 
         elif user_input.startswith('/review'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path to review.", "yellow"))
+                print(colored("Please provide at least one file path to review.", "orange"))
                 logging.warning("User issued /review without file paths.")
                 continue
 
@@ -513,7 +513,7 @@ Files to modify:
                     continue
 
             if not file_contents:
-                print(colored("No valid files to review.", "yellow"))
+                print(colored("No valid files to review.", "orange"))
                 continue
 
             review_request = f"{CODE_REVIEW_PROMPT}\n\nFiles to review:\n"
