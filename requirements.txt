@@ -1,6 +1,4 @@
-openai
-prompt_toolkit
-rich
-PyYAML
-python-dotenv
-fuzzywuzzy
+ openai                                                                      
+ termcolor                                                                   
+ prompt_toolkit                                                              
+ rich
