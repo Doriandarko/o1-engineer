@@ -18,7 +18,7 @@ MODEL = "o1-mini"
 # Initialize OpenAI client
 client = OpenAI(api_key="YOUR KEY")
 
-# Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
+
 CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
 
 When given a user request, perform the following steps:
@@ -114,7 +114,17 @@ Instructions:
 
 Only provide instructions for files that need changes. Be specific and clear in your instructions."""
 
-# Add this near the top of the file, with other global variables
+APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
+
+1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
+2. Apply the Changes: Modify the original file content according to the instructions.
+3. Return the Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes
+4. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
+
+Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text.
+YOU NEVER CREATE DUPLICATE CODE. MAKE SURE YOU DO NOT CREATE DUPLICATE CODE WHEN REWRITING THE NEW FILE"""
+
+
 last_ai_response = None
 conversation_history = []
 
@@ -191,77 +201,7 @@ def add_file_to_context(file_path, added_files):
             print(colored(f"Error reading file {file_path}: {e}", "red"))
             logging.error(f"Error reading file {file_path}: {e}")
 
-# Add this near the top of the file, with other global variables
-def apply_edit_instructions(edit_instructions, original_files):
-    modified_files = {}
-    for file_path, content in original_files.items():
-        if file_path in edit_instructions:
-            instructions = edit_instructions[file_path]
-            prompt = f"{APPLY_EDITS_PROMPT}\n\nOriginal File: {file_path}\nContent:\n{content}\n\nEdit Instructions:\n{instructions}\n\nUpdated File Content:"
-            response = chat_with_ai(prompt, is_edit_request=True)
-            if response:
-                modified_files[file_path] = response.strip()
-        else:
-            modified_files[file_path] = content  # No changes for this file
-    return modified_files
 
-# Update the chat_with_ai function
-def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
-    global last_ai_response, conversation_history
-    try:
-        # Include added file contents and conversation history in the user message
-        if added_files:
-            file_context = "Added files:\n"
-            for file_path, content in added_files.items():
-                file_context += f"File: {file_path}\nContent:\n{content}\n\n"
-            user_message = f"{file_context}\n{user_message}"
-
-        # Include conversation history
-        if not is_edit_request:
-            history = "\n".join([f"User: {msg}" if i % 2 == 0 else f"AI: {msg}" for i, msg in enumerate(conversation_history)])
-            if history:
-                user_message = f"{history}\nUser: {user_message}"
-
-        # Prepare the message content based on the request type
-        if is_edit_request:
-            prompt = EDIT_INSTRUCTION_PROMPT if retry_count == 0 else APPLY_EDITS_PROMPT
-            message_content = f"{prompt}\n\nUser request: {user_message}"
-        else:
-            message_content = user_message
-
-        messages = [
-            {"role": "user", "content": message_content}
-        ]
-        
-        if is_edit_request and retry_count == 0:
-            print(colored("Analyzing files and generating modifications...", "magenta"))
-            logging.info("Sending edit request to AI.")
-        elif not is_edit_request:
-            print(colored("o1 engineer is thinking...", "magenta"))
-            logging.info("Sending general query to AI.")
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            max_completion_tokens=60000
-        )
-        logging.info("Received response from AI.")
-        last_ai_response = response.choices[0].message.content
-
-        if not is_edit_request:
-            # Update conversation history
-            conversation_history.append(user_message)
-            conversation_history.append(last_ai_response)
-            if len(conversation_history) > 20:  # 10 interactions (user + AI each)
-                conversation_history = conversation_history[-20:]
-
-        return last_ai_response
-    except Exception as e:
-        print(colored(f"Error while communicating with OpenAI: {e}", "red"))
-        logging.error(f"Error while communicating with OpenAI: {e}")
-        return None
-
-# Step 5: Update the apply_modifications function
 def apply_modifications(new_content, file_path):
     try:
         with open(file_path, 'r') as file:
@@ -388,16 +328,97 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
         logging.error(f"An unexpected error occurred during creation: {e}")
         return False
 
-APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
 
-1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
-2. Apply the Changes: Modify the original file content according to the instructions.
-3. Return the Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes
-4. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
 
-Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text."""
+def parse_edit_instructions(response):
+    instructions = {}
+    current_file = None
+    current_instructions = []
 
-# Step 4: Modify the main function
+    for line in response.split('\n'):
+        if line.startswith("File: "):
+            if current_file:
+                instructions[current_file] = "\n".join(current_instructions)
+            current_file = line[6:].strip()
+            current_instructions = []
+        elif line.strip() and current_file:
+            current_instructions.append(line.strip())
+
+    if current_file:
+        instructions[current_file] = "\n".join(current_instructions)
+
+    return instructions
+
+def apply_edit_instructions(edit_instructions, original_files):
+    modified_files = {}
+    for file_path, content in original_files.items():
+        if file_path in edit_instructions:
+            instructions = edit_instructions[file_path]
+            prompt = f"{APPLY_EDITS_PROMPT}\n\nOriginal File: {file_path}\nContent:\n{content}\n\nEdit Instructions:\n{instructions}\n\nUpdated File Content:"
+            response = chat_with_ai(prompt, is_edit_request=True)
+            if response:
+                modified_files[file_path] = response.strip()
+        else:
+            modified_files[file_path] = content  # No changes for this file
+    return modified_files
+
+def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
+    global last_ai_response, conversation_history
+    try:
+        # Include added file contents and conversation history in the user message
+        if added_files:
+            file_context = "Added files:\n"
+            for file_path, content in added_files.items():
+                file_context += f"File: {file_path}\nContent:\n{content}\n\n"
+            user_message = f"{file_context}\n{user_message}"
+
+        # Include conversation history
+        if not is_edit_request:
+            history = "\n".join([f"User: {msg}" if i % 2 == 0 else f"AI: {msg}" for i, msg in enumerate(conversation_history)])
+            if history:
+                user_message = f"{history}\nUser: {user_message}"
+
+        # Prepare the message content based on the request type
+        if is_edit_request:
+            prompt = EDIT_INSTRUCTION_PROMPT if retry_count == 0 else APPLY_EDITS_PROMPT
+            message_content = f"{prompt}\n\nUser request: {user_message}"
+        else:
+            message_content = user_message
+
+        messages = [
+            {"role": "user", "content": message_content}
+        ]
+        
+        if is_edit_request and retry_count == 0:
+            print(colored("Analyzing files and generating modifications...", "magenta"))
+            logging.info("Sending edit request to AI.")
+        elif not is_edit_request:
+            print(colored("o1 engineer is thinking...", "magenta"))
+            logging.info("Sending general query to AI.")
+
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            max_completion_tokens=60000
+        )
+        logging.info("Received response from AI.")
+        last_ai_response = response.choices[0].message.content
+
+        if not is_edit_request:
+            # Update conversation history
+            conversation_history.append(user_message)
+            conversation_history.append(last_ai_response)
+            if len(conversation_history) > 20:  # 10 interactions (user + AI each)
+                conversation_history = conversation_history[-20:]
+
+        return last_ai_response
+    except Exception as e:
+        print(colored(f"Error while communicating with OpenAI: {e}", "red"))
+        logging.error(f"Error while communicating with OpenAI: {e}")
+        return None
+    
+
+
 def main():
     global last_ai_response, conversation_history
 
@@ -592,421 +613,7 @@ Files to modify:
                 rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
 
-# New function to parse edit instructions
-def parse_edit_instructions(response):
-    instructions = {}
-    current_file = None
-    current_instructions = []
 
-    for line in response.split('\n'):
-        if line.startswith("File: "):
-            if current_file:
-                instructions[current_file] = "\n".join(current_instructions)
-            current_file = line[6:].strip()
-            current_instructions = []
-        elif line.strip() and current_file:
-            current_instructions.append(line.strip())
-
-    if current_file:
-        instructions[current_file] = "\n".join(current_instructions)
-
-    return instructions
-
-if __name__ == "__main__":
-    main()
-
-def parse_edit_instructions(response):
-    instructions = {}
-    current_file = None
-    current_instructions = []
-
-    for line in response.split('\n'):
-        if line.startswith("File: "):
-            if current_file:
-                instructions[current_file] = "\n".join(current_instructions)
-            current_file = line[6:].strip()
-            current_instructions = []
-        elif line.strip() and current_file:
-            current_instructions.append(line.strip())
-
-    if current_file:
-        instructions[current_file] = "\n".join(current_instructions)
-
-    return instructions
-
-def apply_edit_instructions(edit_instructions, original_files):
-    modified_files = {}
-    for file_path, content in original_files.items():
-        if file_path in edit_instructions:
-            instructions = edit_instructions[file_path]
-            prompt = f"{APPLY_EDITS_PROMPT}\n\nOriginal File: {file_path}\nContent:\n{content}\n\nEdit Instructions:\n{instructions}\n\nUpdated File Content:"
-            response = chat_with_ai(prompt, is_edit_request=True)
-            if response:
-                modified_files[file_path] = response.strip()
-        else:
-            modified_files[file_path] = content  # No changes for this file
-    return modified_files
-
-def apply_creation_steps(creation_response, added_files, retry_count=0):
-    max_retries = 3
-    try:
-        code_blocks = re.findall(r'```(?:\w+)?\s*([\s\S]*?)```', creation_response)
-        if not code_blocks:
-            raise ValueError("No code blocks found in the AI response.")
-
-        print("Successfully extracted code blocks:")
-        logging.info("Successfully extracted code blocks from creation response.")
-
-        for code in code_blocks:
-            # Extract file/folder information from the special comment line
-            info_match = re.match(r'### (FILE|FOLDER): (.+)', code.strip())
-            
-            if info_match:
-                item_type, path = info_match.groups()
-                
-                if item_type == 'FOLDER':
-                    # Create the folder
-                    os.makedirs(path, exist_ok=True)
-                    print(colored(f"Folder created: {path}", "green"))
-                    logging.info(f"Folder created: {path}")
-                elif item_type == 'FILE':
-                    # Extract file content (everything after the special comment line)
-                    file_content = re.sub(r'### FILE: .+\n', '', code, count=1).strip()
-
-                    # Create directories if necessary
-                    directory = os.path.dirname(path)
-                    if directory and not os.path.exists(directory):
-                        os.makedirs(directory, exist_ok=True)
-                        print(colored(f"Folder created: {directory}", "green"))
-                        logging.info(f"Folder created: {directory}")
-
-                    # Write content to the file
-                    with open(path, 'w', encoding='utf-8') as f:
-                        f.write(file_content)
-                    print(colored(f"File created: {path}", "green"))
-                    logging.info(f"File created: {path}")
-            else:
-                print(colored("Error: Could not determine the file or folder information from the code block.", "red"))
-                logging.error("Could not determine the file or folder information from the code block.")
-                continue
-
-        return True
-
-    except ValueError as e:
-        if retry_count < max_retries:
-            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "red"))
-            logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
-            error_message = f"{str(e)} Please provide the creation instructions again using the specified format."
-            time.sleep(2 ** retry_count)  # Exponential backoff
-            new_response = chat_with_ai(error_message, is_edit_request=False, added_files=added_files)
-            if new_response:
-                return apply_creation_steps(new_response, added_files, retry_count + 1)
-            else:
-                return False
-        else:
-            print(colored(f"Failed to parse creation instructions after multiple attempts: {str(e)}", "red"))
-            logging.error(f"Failed to parse creation instructions after multiple attempts: {str(e)}")
-            print("Creation response that failed to parse:")
-            print(creation_response)
-            return False
-    except Exception as e:
-        print(colored(f"An unexpected error occurred during creation: {e}", "red"))
-        logging.error(f"An unexpected error occurred during creation: {e}")
-        return False
-
-def apply_modifications(new_content, file_path):
-    try:
-        with open(file_path, 'r') as file:
-            old_content = file.read()
-
-        if old_content.strip() == new_content.strip():
-            print(colored(f"No changes detected in {file_path}", "red"))
-            return True
-
-        display_diff(old_content, new_content, file_path)
-
-        confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=Style.from_dict({'prompt': 'orange'})).strip().lower()
-        if confirm == 'yes':
-            with open(file_path, 'w') as file:
-                file.write(new_content)
-            print(colored(f"Modifications applied to {file_path} successfully.", "green"))
-            logging.info(f"Modifications applied to {file_path} successfully.")
-            return True
-        else:
-            print(colored(f"Changes not applied to {file_path}.", "red"))
-            logging.info(f"User chose not to apply changes to {file_path}.")
-            return False
-
-    except Exception as e:
-        print(colored(f"An error occurred while applying modifications to {file_path}: {e}", "red"))
-        logging.error(f"Error applying modifications to {file_path}: {e}")
-        return False
-
-def display_diff(old_content, new_content, file_path):
-    diff = list(difflib.unified_diff(
-        old_content.splitlines(keepends=True),
-        new_content.splitlines(keepends=True),
-        fromfile=f"a/{file_path}",
-        tofile=f"b/{file_path}",
-        lineterm='',
-        n=5
-    ))
-    
-    if not diff:
-        print(f"No changes detected in {file_path}")
-        return
-
-    print(f"\nDiff for {file_path}:")
-
-    markdown_diff = "```diff\n"
-    for line in diff:
-        if line.startswith('+'):
-            markdown_diff += line + "\n"
-        elif line.startswith('-'):
-            markdown_diff += line + "\n"
-        elif line.startswith('^'):
-            markdown_diff += line + "\n"
-        else:
-            markdown_diff += " " + line + "\n"
-    markdown_diff += "```"
-
-    console = Console()
-    console.print(Markdown(markdown_diff))
-
-def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
-    global last_ai_response, conversation_history
-    try:
-        # Include added file contents and conversation history in the user message
-        if added_files:
-            file_context = "Added files:\n"
-            for file_path, content in added_files.items():
-                file_context += f"File: {file_path}\nContent:\n{content}\n\n"
-            user_message = f"{file_context}\n{user_message}"
-
-        # Include conversation history
-        if not is_edit_request:
-            history = "\n".join([f"User: {msg}" if i % 2 == 0 else f"AI: {msg}" for i, msg in enumerate(conversation_history)])
-            if history:
-                user_message = f"{history}\nUser: {user_message}"
-
-        # Prepare the message content based on the request type
-        if is_edit_request:
-            prompt = EDIT_INSTRUCTION_PROMPT if retry_count == 0 else APPLY_EDITS_PROMPT
-            message_content = f"{prompt}\n\nUser request: {user_message}"
-        else:
-            message_content = user_message
-
-        messages = [
-            {"role": "user", "content": message_content}
-        ]
-        
-        if is_edit_request and retry_count == 0:
-            print(colored("Analyzing files and generating modifications...", "magenta"))
-            logging.info("Sending edit request to AI.")
-        elif not is_edit_request:
-            print(colored("o1 engineer is thinking...", "magenta"))
-            logging.info("Sending general query to AI.")
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            max_completion_tokens=60000
-        )
-        logging.info("Received response from AI.")
-        last_ai_response = response.choices[0].message.content
-
-        if not is_edit_request:
-            # Update conversation history
-            conversation_history.append(user_message)
-            conversation_history.append(last_ai_response)
-            if len(conversation_history) > 20:  # 10 interactions (user + AI each)
-                conversation_history = conversation_history[-20:]
-
-        return last_ai_response
-    except Exception as e:
-        print(colored(f"Error while communicating with OpenAI: {e}", "red"))
-        logging.error(f"Error while communicating with OpenAI: {e}")
-        return None
-
-# Keep the new edit instruction prompts
-EDIT_INSTRUCTION_PROMPT = """You are an advanced o1 engineer designed to analyze files and provide edit instructions based on user requests. Your task is to:
-
-1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
-2. Analyze the File(s): Review the content of the provided file(s).
-3. Generate Edit Instructions: Provide clear, step-by-step instructions on how to modify the file(s) to address the user's request.
-
-Your response should be in the following format:
-
-```
-File: [file_path]
-Instructions:
-1. [First edit instruction]
-2. [Second edit instruction]
-...
-
-File: [another_file_path]
-Instructions:
-1. [First edit instruction]
-2. [Second edit instruction]
-...
-
-```
-
-Only provide instructions for files that need changes. Be specific and clear in your instructions."""
-
-APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
-
-1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
-2. Apply the Changes: Modify the original file content according to the instructions.
-3. Return the Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes
-4. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
-
-Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text."""
-
-def apply_creation_steps(creation_response, added_files, retry_count=0):
-    max_retries = 3
-    try:
-        code_blocks = re.findall(r'```(?:\w+)?\s*([\s\S]*?)```', creation_response)
-        if not code_blocks:
-            raise ValueError("No code blocks found in the AI response.")
-
-        print("Successfully extracted code blocks:")
-        logging.info("Successfully extracted code blocks from creation response.")
-
-        for code in code_blocks:
-            # Extract file/folder information from the special comment line
-            info_match = re.match(r'### (FILE|FOLDER): (.+)', code.strip())
-            
-            if info_match:
-                item_type, path = info_match.groups()
-                
-                if item_type == 'FOLDER':
-                    # Create the folder
-                    os.makedirs(path, exist_ok=True)
-                    print(colored(f"Folder created: {path}", "green"))
-                    logging.info(f"Folder created: {path}")
-                elif item_type == 'FILE':
-                    # Extract file content (everything after the special comment line)
-                    file_content = re.sub(r'### FILE: .+\n', '', code, count=1).strip()
-
-                    # Create directories if necessary
-                    directory = os.path.dirname(path)
-                    if directory and not os.path.exists(directory):
-                        os.makedirs(directory, exist_ok=True)
-                        print(colored(f"Folder created: {directory}", "green"))
-                        logging.info(f"Folder created: {directory}")
-
-                    # Write content to the file
-                    with open(path, 'w', encoding='utf-8') as f:
-                        f.write(file_content)
-                    print(colored(f"File created: {path}", "green"))
-                    logging.info(f"File created: {path}")
-            else:
-                print(colored("Error: Could not determine the file or folder information from the code block.", "red"))
-                logging.error("Could not determine the file or folder information from the code block.")
-                continue
-
-        return True
-
-    except ValueError as e:
-        if retry_count < max_retries:
-            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "red"))
-            logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
-            error_message = f"{str(e)} Please provide the creation instructions again using the specified format."
-            time.sleep(2 ** retry_count)  # Exponential backoff
-            new_response = chat_with_ai(error_message, is_edit_request=False, added_files=added_files)
-            if new_response:
-                return apply_creation_steps(new_response, added_files, retry_count + 1)
-            else:
-                return False
-        else:
-            print(colored(f"Failed to parse creation instructions after multiple attempts: {str(e)}", "red"))
-            logging.error(f"Failed to parse creation instructions after multiple attempts: {str(e)}")
-            print("Creation response that failed to parse:")
-            print(creation_response)
-            return False
-    except Exception as e:
-        print(colored(f"An unexpected error occurred during creation: {e}", "red"))
-        logging.error(f"An unexpected error occurred during creation: {e}")
-        return False
-
-def apply_modifications(new_content, file_path):
-    try:
-        with open(file_path, 'r') as file:
-            old_content = file.read()
-
-        if old_content.strip() == new_content.strip():
-            print(colored(f"No changes detected in {file_path}", "red"))
-            return True
-
-        display_diff(old_content, new_content, file_path)
-
-        confirm = prompt(f"Apply these changes to {file_path}? (yes/no): ", style=Style.from_dict({'prompt': 'orange'})).strip().lower()
-        if confirm == 'yes':
-            with open(file_path, 'w') as file:
-                file.write(new_content)
-            print(colored(f"Modifications applied to {file_path} successfully.", "green"))
-            logging.info(f"Modifications applied to {file_path} successfully.")
-            return True
-        else:
-            print(colored(f"Changes not applied to {file_path}.", "red"))
-            logging.info(f"User chose not to apply changes to {file_path}.")
-            return False
-
-    except Exception as e:
-        print(colored(f"An error occurred while applying modifications to {file_path}: {e}", "red"))
-        logging.error(f"Error applying modifications to {file_path}: {e}")
-        return False
-
-def display_diff(old_content, new_content, file_path):
-    diff = list(difflib.unified_diff(
-        old_content.splitlines(keepends=True),
-        new_content.splitlines(keepends=True),
-        fromfile=f"a/{file_path}",
-        tofile=f"b/{file_path}",
-        lineterm='',
-        n=5
-    ))
-    
-    if not diff:
-        print(f"No changes detected in {file_path}")
-        return
-
-    print(f"\nDiff for {file_path}:")
-
-    markdown_diff = "```diff\n"
-    for line in diff:
-        if line.startswith('+'):
-            markdown_diff += line + "\n"
-        elif line.startswith('-'):
-            markdown_diff += line + "\n"
-        elif line.startswith('^'):
-            markdown_diff += line + "\n"
-        else:
-            markdown_diff += " " + line + "\n"
-    markdown_diff += "```"
-
-    console = Console()
-    console.print(Markdown(markdown_diff))
-
-def parse_edit_instructions(response):
-    instructions = {}
-    current_file = None
-    current_instructions = []
-
-    for line in response.split('\n'):
-        if line.startswith("File: "):
-            if current_file:
-                instructions[current_file] = "\n".join(current_instructions)
-            current_file = line[6:].strip()
-            current_instructions = []
-        elif line.strip() and current_file:
-            current_instructions.append(line.strip())
-
-    if current_file:
-        instructions[current_file] = "\n".join(current_instructions)
-
-    return instructions
 
 if __name__ == "__main__":
     main()
