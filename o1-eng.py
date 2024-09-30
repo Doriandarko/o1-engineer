@@ -18,13 +18,13 @@ MODEL = "o1-mini"
 client = OpenAI(api_key="YOUR KEY")
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
-CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
+CREATE_SYSTEM_PROMPT = """You are an advanced, creative AI engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
 
 When given a user request, perform the following steps:
 
 1. Understand the User Request: Carefully interpret what the user wants to create.
 2. Generate Creation Instructions: Provide the content for each file to be created within appropriate code blocks. Each code block should begin with a special comment line that specifies whether it's a file or folder, along with its path.
-3. You create full functioning, complete,code files, not just snippets. No approximations or placeholders. FULL WORKING CODE.
+3. You create full functioning, complete, code files, not just snippets. No approximations or placeholders. FULL WORKING CODE.
 
 IMPORTANT: Your response must ONLY contain the code blocks with no additional text before or after. Do not use markdown formatting outside of the code blocks. Use the following format for the special comment line. Do not include any explanations, additional text:
 
@@ -92,6 +92,8 @@ Your review should be detailed but concise, focusing on the most important aspec
 last_ai_response = None
 conversation_history = []
 
+PLANNING_PROMPT = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough."""
+
 def is_binary_file(file_path):
     """Check if a file is binary."""
     try:
@@ -123,7 +125,7 @@ def add_file_to_context(file_path, added_files):
         logging.error(f"Error reading file {file_path}: {e}")
 
 # Keep the new edit instruction prompts
-EDIT_INSTRUCTION_PROMPT = """You are an advanced o1 engineer designed to analyze files and provide edit instructions based on user requests. Your task is to:
+EDIT_INSTRUCTION_PROMPT = """You are an advanced ai engineer designed to analyze files and provide edit instructions based on user requests. Your task is to:
 
 1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
 2. Analyze the File(s): Review the content of the provided file(s).
@@ -148,7 +150,7 @@ Instructions:
 
 Only provide instructions for files that need changes. Be specific and clear in your instructions."""
 
-APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
+APPLY_EDITS_PROMPT = """You are an advanced ai engineer designed to apply edit instructions to files. Your task is to:
 
 1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
 2. Apply the Changes: Modify the original file content according to the instructions.
@@ -197,7 +199,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         messages = [
             {"role": "user", "content": message_content}
         ]
-        
+
         if is_edit_request and retry_count == 0:
             print(colored("Analyzing files and generating modifications...", "magenta"))
             logging.info("Sending edit request to AI.")
@@ -264,7 +266,7 @@ def display_diff(old_content, new_content, file_path):
         lineterm='',
         n=5
     ))
-    
+
     if not diff:
         print(f"No changes detected in {file_path}")
         return
@@ -299,10 +301,10 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
         for code in code_blocks:
             # Extract file/folder information from the special comment line
             info_match = re.match(r'### (FILE|FOLDER): (.+)', code.strip())
-            
+
             if info_match:
                 item_type, path = info_match.groups()
-                
+
                 if item_type == 'FOLDER':
                     # Create the folder
                     os.makedirs(path, exist_ok=True)
@@ -357,7 +359,7 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
 def main():
     global last_ai_response, conversation_history
 
-    
+
 
     print(colored("o1 engineer is ready to help you.", "cyan"))
     print("\nAvailable commands:")
@@ -367,6 +369,7 @@ def main():
     print(f"{colored('/debug', 'magenta'):<10} {colored('Print the last AI response', 'dark_grey')}")
     print(f"{colored('/reset', 'magenta'):<10} {colored('Reset chat context and clear added files', 'dark_grey')}")
     print(f"{colored('/review', 'magenta'):<10} {colored('Review code files (followed by file paths)', 'dark_grey')}")
+    print(f"{colored('/planning', 'magenta'):<10} {colored('Generate a detailed plan based on your request', 'dark_grey')}")  # New Line
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
 
     style = Style.from_dict({
@@ -377,7 +380,10 @@ def main():
     files = [f for f in os.listdir('.') if os.path.isfile(f)]
 
     # Create a WordCompleter with available commands and files
-    completer = WordCompleter(['/edit', '/create', '/add', '/quit', '/debug', '/reset', '/review'] + files, ignore_case=True)
+    completer = WordCompleter(
+    ['/edit', '/create', '/add', '/quit', '/debug', '/reset', '/review', '/planning'] + files,
+    ignore_case=True
+    )
 
     added_files = {}
 
@@ -450,7 +456,7 @@ Files to modify:
                 edit_request += f"\nFile: {file_path}\nContent:\n{content}\n\n"
 
             ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
-            
+
             if ai_response:
                 print("o1 engineer: Here are the suggested edit instructions:")
                 rprint(Markdown(ai_response))
@@ -474,7 +480,7 @@ Files to modify:
 
             create_request = f"{CREATE_SYSTEM_PROMPT}\n\nUser request: {creation_instruction}"
             ai_response = chat_with_ai(create_request, is_edit_request=False, added_files=added_files)
-            
+
             if ai_response:
                 while True:
                     print("o1 engineer: Here is the suggested creation structure:")
@@ -522,12 +528,29 @@ Files to modify:
 
             print(colored("Analyzing code and generating review...", "magenta"))
             ai_response = chat_with_ai(review_request, is_edit_request=False, added_files=added_files)
-            
+
             if ai_response:
                 print()
                 print(colored("Code Review:", "blue"))
                 rprint(Markdown(ai_response))
                 logging.info("Provided code review for requested files.")
+
+        elif user_input.startswith('/planning'):
+            planning_instruction = user_input[9:].strip()  # Remove '/planning' and leading/trailing whitespace
+            if not planning_instruction:
+                print(colored("Please provide a planning request after /planning.", "red"))
+                logging.warning("User issued /planning without instructions.")
+                continue
+            planning_request = f"{PLANNING_PROMPT}\n\nUser request: {planning_instruction}"
+            ai_response = chat_with_ai(planning_request, is_edit_request=False, added_files=added_files)
+            if ai_response:
+                print()
+                print(colored("o1 engineer: Here is your detailed plan:", "blue"))
+                rprint(Markdown(ai_response))
+                logging.info("Provided planning response to user.")
+            else:
+                print(colored("Failed to generate a planning response. Please try again.", "red"))
+                logging.error("AI failed to generate a planning response.")
 
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
