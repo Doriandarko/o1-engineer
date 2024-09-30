@@ -15,7 +15,7 @@ import re
 
 MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YOUR KEY")
+client = OpenAI(api_key="YOU KEY")
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
 CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
@@ -24,6 +24,7 @@ When given a user request, perform the following steps:
 
 1. Understand the User Request: Carefully interpret what the user wants to create.
 2. Generate Creation Instructions: Provide the content for each file to be created within appropriate code blocks. Each code block should begin with a special comment line that specifies whether it's a file or folder, along with its path.
+3. You create full functioning, complete,code files, not just snippets. No approximations or placeholders. FULL WORKING CODE.
 
 IMPORTANT: Your response must ONLY contain the code blocks with no additional text before or after. Do not use markdown formatting outside of the code blocks. Use the following format for the special comment line. Do not include any explanations, additional text:
 
