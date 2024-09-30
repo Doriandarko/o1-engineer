@@ -18,7 +18,7 @@ MODEL = "o1-mini"
 client = OpenAI(api_key="YOUR KEY")
 
 # Updated CREATE_SYSTEM_PROMPT to request code blocks instead of JSON
-CREATE_SYSTEM_PROMPT = """You are an advanced AI assistant designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
+CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
 
 When given a user request, perform the following steps:
 
@@ -123,7 +123,7 @@ def add_file_to_context(file_path, added_files):
         logging.error(f"Error reading file {file_path}: {e}")
 
 # Keep the new edit instruction prompts
-EDIT_INSTRUCTION_PROMPT = """You are an advanced AI assistant designed to analyze files and provide edit instructions based on user requests. Your task is to:
+EDIT_INSTRUCTION_PROMPT = """You are an advanced o1 engineer designed to analyze files and provide edit instructions based on user requests. Your task is to:
 
 1. Understand the User Request: Carefully interpret what the user wants to achieve with the modification.
 2. Analyze the File(s): Review the content of the provided file(s).
@@ -148,7 +148,7 @@ Instructions:
 
 Only provide instructions for files that need changes. Be specific and clear in your instructions."""
 
-APPLY_EDITS_PROMPT = """You are an advanced AI assistant designed to apply edit instructions to files. Your task is to:
+APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
 
 1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
 2. Apply the Changes: Modify the original file content according to the instructions.
@@ -202,7 +202,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             print(colored("Analyzing files and generating modifications...", "magenta"))
             logging.info("Sending edit request to AI.")
         elif not is_edit_request:
-            print(colored("AI assistant is thinking...", "magenta"))
+            print(colored("o1 engineer is thinking...", "magenta"))
             logging.info("Sending general query to AI.")
 
         response = client.chat.completions.create(
@@ -233,7 +233,7 @@ def apply_modifications(new_content, file_path):
             old_content = file.read()
 
         if old_content.strip() == new_content.strip():
-            print(colored(f"No changes detected in {file_path}", "orange"))
+            print(colored(f"No changes detected in {file_path}", "red"))
             return True
 
         display_diff(old_content, new_content, file_path)
@@ -246,7 +246,7 @@ def apply_modifications(new_content, file_path):
             logging.info(f"Modifications applied to {file_path} successfully.")
             return True
         else:
-            print(colored(f"Changes not applied to {file_path}.", "orange"))
+            print(colored(f"Changes not applied to {file_path}.", "red"))
             logging.info(f"User chose not to apply changes to {file_path}.")
             return False
 
@@ -333,7 +333,7 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
 
     except ValueError as e:
         if retry_count < max_retries:
-            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "orange"))
+            print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "red"))
             logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
             error_message = f"{str(e)} Please provide the creation instructions again using the specified format."
             time.sleep(2 ** retry_count)  # Exponential backoff
@@ -359,7 +359,7 @@ def main():
 
     
 
-    print(colored("AI File Editor is ready to help you.", "cyan"))
+    print(colored("o1 engineer is ready to help you.", "cyan"))
     print("\nAvailable commands:")
     print(f"{colored('/edit', 'magenta'):<10} {colored('Edit files (followed by file paths)', 'dark_grey')}")
     print(f"{colored('/create', 'magenta'):<10} {colored('Create files or folders (followed by instructions)', 'dark_grey')}")
@@ -395,7 +395,7 @@ def main():
                 print(colored("Last AI Response:", "blue"))
                 print(last_ai_response)
             else:
-                print(colored("No AI response available yet.", "orange"))
+                print(colored("No AI response available yet.", "red"))
 
         elif user_input.lower() == '/reset':
             conversation_history = []
@@ -407,7 +407,7 @@ def main():
         elif user_input.startswith('/add'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path.", "orange"))
+                print(colored("Please provide at least one file path.", "red"))
                 logging.warning("User issued /add without file paths.")
                 continue
 
@@ -416,13 +416,13 @@ def main():
 
             total_size = sum(len(content) for content in added_files.values())
             if total_size > 100000:  # Warning if total content exceeds ~100KB
-                print(colored("Warning: The total size of added files is large and may affect performance.", "orange"))
+                print(colored("Warning: The total size of added files is large and may affect performance.", "red"))
                 logging.warning("Total size of added files exceeds 100KB.")
 
         elif user_input.startswith('/edit'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path.", "orange"))
+                print(colored("Please provide at least one file path.", "red"))
                 logging.warning("User issued /edit without file paths.")
                 continue
 
@@ -437,7 +437,7 @@ def main():
                     continue
 
             if not file_contents:
-                print(colored("No valid files to edit.", "orange"))
+                print(colored("No valid files to edit.", "red"))
                 continue
 
             edit_instruction = prompt(f"Edit Instruction for all files: ", style=style).strip()
@@ -452,7 +452,7 @@ Files to modify:
             ai_response = chat_with_ai(edit_request, is_edit_request=True, added_files=added_files)
             
             if ai_response:
-                print("AI Assistant: Here are the suggested edit instructions:")
+                print("o1 engineer: Here are the suggested edit instructions:")
                 rprint(Markdown(ai_response))
 
                 confirm = prompt("Do you want to apply these edit instructions? (yes/no): ", style=style).strip().lower()
@@ -462,13 +462,13 @@ Files to modify:
                     for file_path, new_content in modified_files.items():
                         apply_modifications(new_content, file_path)
                 else:
-                    print(colored("Edit instructions not applied.", "orange"))
+                    print(colored("Edit instructions not applied.", "red"))
                     logging.info("User chose not to apply edit instructions.")
 
         elif user_input.startswith('/create'):
             creation_instruction = user_input[7:].strip()  # Remove '/create' and leading/trailing whitespace
             if not creation_instruction:
-                print(colored("Please provide creation instructions after /create.", "orange"))
+                print(colored("Please provide creation instructions after /create.", "red"))
                 logging.warning("User issued /create without instructions.")
                 continue
 
@@ -477,7 +477,7 @@ Files to modify:
             
             if ai_response:
                 while True:
-                    print("AI Assistant: Here is the suggested creation structure:")
+                    print("o1 engineer: Here is the suggested creation structure:")
                     rprint(Markdown(ai_response))
 
                     confirm = prompt("Do you want to execute these creation steps? (yes/no): ", style=style).strip().lower()
@@ -491,14 +491,14 @@ Files to modify:
                                 break
                             ai_response = chat_with_ai("The previous creation attempt failed. Please try again with a different approach.", is_edit_request=False, added_files=added_files)
                     else:
-                        print(colored("Creation steps not executed.", "orange"))
+                        print(colored("Creation steps not executed.", "red"))
                         logging.info("User chose not to execute creation steps.")
                         break
 
         elif user_input.startswith('/review'):
             file_paths = user_input.split()[1:]
             if not file_paths:
-                print(colored("Please provide at least one file path to review.", "orange"))
+                print(colored("Please provide at least one file path to review.", "red"))
                 logging.warning("User issued /review without file paths.")
                 continue
 
@@ -513,7 +513,7 @@ Files to modify:
                     continue
 
             if not file_contents:
-                print(colored("No valid files to review.", "orange"))
+                print(colored("No valid files to review.", "red"))
                 continue
 
             review_request = f"{CODE_REVIEW_PROMPT}\n\nFiles to review:\n"
@@ -533,7 +533,7 @@ Files to modify:
             ai_response = chat_with_ai(user_input, added_files=added_files)
             if ai_response:
                 print()
-                print(colored("AI Assistant:", "blue"))
+                print(colored("o1 engineer:", "blue"))
                 rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
 
