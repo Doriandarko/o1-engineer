@@ -133,13 +133,22 @@ last_ai_response = None
 conversation_history = []
 
 def is_binary_file(file_path):
-    """Check if a file is binary."""
+    """Check if a file is binary by reading a small portion of it."""
     try:
-        with open(file_path, 'r') as check_file:
-            check_file.read()
-        return False
-    except UnicodeDecodeError:
-        return True
+        with open(file_path, 'rb') as file:
+            chunk = file.read(1024)  # Read the first 1024 bytes
+            if b'\0' in chunk:
+                return True  # File is binary if it contains null bytes
+            # Use a heuristic to detect binary content
+            text_characters = bytearray({7,8,9,10,12,13,27} | set(range(0x20, 0x100)))
+            non_text = chunk.translate(None, text_characters)
+            if len(non_text) / len(chunk) > 0.30:
+                return True  # Consider binary if more than 30% non-text characters
+    except Exception as e:
+        logging.error(f"Error reading file {file_path}: {e}")
+        return True  # Assume binary if an error occurs
+    return False  # File is likely text
+
 
 # Load .gitignore patterns if in a git repository
 def load_gitignore_patterns(directory):
@@ -162,8 +171,7 @@ def should_ignore(file_path, patterns):
 def add_file_to_context(file_path, added_files, action='to the chat context'):
     """Add a file to the given dictionary, applying exclusion rules."""
     excluded_dirs = {'__pycache__', '.git', 'node_modules'}
-    excluded_extensions = {'.exe', '.bin', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico', '.svg', '.webp', '.dll', '.so', '.dylib', '.zip', '.tar', '.gz', '.rar', '.7z', '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.wav', '.ogg', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.db', '.sqlite', '.mdb', '.iso', '.dmg', '.apk', '.ipa'}
-    supported_extensions = {'.py', '.js', '.html', '.css', '.java', '.cpp', '.ts', '.jsx', '.php', '.go', '.rb', '.swift', '.kt', '.rs', '.sql', '.txt', '.md', '.json', '.xml', '.yaml', '.yml', '.ini', '.cfg', '.conf', '.log', '.csv', '.tsv'}
+    # Removed reliance on 'excluded_extensions' and 'supported_extensions'
 
     # Load .gitignore patterns if in a git repository
     gitignore_patterns = []
@@ -181,23 +189,12 @@ def add_file_to_context(file_path, added_files, action='to the chat context'):
             print(colored(f"Skipped file matching .gitignore pattern: {file_path}", "yellow"))
             logging.info(f"Skipped file matching .gitignore pattern: {file_path}")
             return
-        # Exclude based on file extension
-        _, ext = os.path.splitext(file_path)
-        if ext.lower() in excluded_extensions:
-            print(colored(f"Skipped binary or unsupported file: {file_path}", "yellow"))
-            logging.info(f"Skipped binary or unsupported file: {file_path}")
-            return
-        # Only add supported file types
-        if ext.lower() not in supported_extensions:
-            print(colored(f"Skipped unsupported file type: {file_path}", "yellow"))
-            logging.info(f"Skipped unsupported file type: {file_path}")
-            return
         if is_binary_file(file_path):
-            print(colored(f"Error: {file_path} appears to be a binary file and cannot be added.", "red"))
-            logging.error(f"{file_path} is a binary file and cannot be added.")
+            print(colored(f"Skipped binary file: {file_path}", "yellow"))
+            logging.info(f"Skipped binary file: {file_path}")
             return
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
                 content = file.read()
                 added_files[file_path] = content
                 print(colored(f"Added {file_path} {action}.", "green"))
