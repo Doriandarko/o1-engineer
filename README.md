@@ -50,7 +50,25 @@ A command-line tool designed to assist developers in managing and interacting wi
 
 - **OpenAI API Key**: Obtain an API key from [OpenAI](https://platform.openai.com/).
 
+- **pipx**: Install pipx if you haven't already. [pipx installation guide](https://pypa.github.io/pipx/installation/)
+
 ### 🔧 Steps
+
+#### Option 1: Install with pipx (Recommended)
+
+1. **Install the package using pipx**:
+
+   ```bash
+   pipx install https://github.com/Doriandarko/o1-engineer/archive/main.zip
+   ```
+
+2. **Run the tool**:
+
+   ```bash
+   o1-engineer
+   ```
+
+#### Option 2: Manual Installation
 
 1. **Clone the Repository**:
 
