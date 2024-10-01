@@ -163,7 +163,7 @@ def add_file_to_context(file_path, added_files, action='to the chat context'):
     """Add a file to the given dictionary, applying exclusion rules."""
     excluded_dirs = {'__pycache__', '.git', 'node_modules'}
     excluded_extensions = {'.exe', '.bin', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico', '.svg', '.webp', '.dll', '.so', '.dylib', '.zip', '.tar', '.gz', '.rar', '.7z', '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.wav', '.ogg', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.db', '.sqlite', '.mdb', '.iso', '.dmg', '.apk', '.ipa'}
-    supported_extensions = {'.py', '.js', '.html', '.css', '.java', '.cpp', '.ts', '.jsx', '.php', '.go', '.rb', '.swift', '.kt', '.rs', '.sql'}
+    supported_extensions = {'.py', '.js', '.html', '.css', '.java', '.cpp', '.ts', '.jsx', '.php', '.go', '.rb', '.swift', '.kt', '.rs', '.sql', '.txt', '.md', '.json', '.xml', '.yaml', '.yml', '.ini', '.cfg', '.conf', '.log', '.csv', '.tsv'}
 
     # Load .gitignore patterns if in a git repository
     gitignore_patterns = []
