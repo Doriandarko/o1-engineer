@@ -14,7 +14,7 @@ from rich.table import Table
 import difflib
 import re
 
-
+# add env vars for OPENAI_MODEL and OPENAI_API_KEY
 if os.environ.get("OPENAI_MODEL"):
     MODEL = os.environ.get("OPENAI_MODEL")
 else:
