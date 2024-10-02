@@ -14,10 +14,19 @@ from rich.table import Table
 import difflib
 import re
 
+# add env vars for OPENAI_MODEL and OPENAI_API_KEY
+if os.environ.get("OPENAI_MODEL"):
+    MODEL = os.environ.get("OPENAI_MODEL")
+else:
+    MODEL = "o1-mini"
 
-MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YOUR KEY")
+if os.environ.get("OPENAI_API_KEY"):
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+else:
+    print(colored("Error: OPENAI_API_KEY environment variable is not set.", "red"))
+    logging.error("Error: OPENAI_API_KEY environment variable is not set.")
+    exit(1)
 
 
 CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
