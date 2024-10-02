@@ -73,6 +73,7 @@ console.log('Hello, World!');
 
 Ensure that each file and folder is correctly specified to facilitate seamless creation by the script."""
 
+
 CODE_REVIEW_PROMPT = """You are an expert code reviewer. Your task is to analyze the provided code files and provide a comprehensive code review. For each file, consider:
 
 1. Code Quality: Assess readability, maintainability, and adherence to best practices
@@ -88,6 +89,7 @@ Format your review as follows:
 3. End with any overall suggestions for the codebase
 
 Your review should be detailed but concise, focusing on the most important aspects of the code."""
+
 
 EDIT_INSTRUCTION_PROMPT = """You are an advanced o1 engineer designed to analyze files and provide edit instructions based on user requests. Your task is to:
 
@@ -109,26 +111,36 @@ Instructions:
 1. [First edit instruction]
 2. [Second edit instruction]
 ...
-
 ```
 
 Only provide instructions for files that need changes. Be specific and clear in your instructions."""
 
-APPLY_EDITS_PROMPT = """You are an advanced o1 engineer designed to apply edit instructions to files. Your task is to:
 
-1. Understand the Edit Instructions: Carefully interpret the provided edit instructions.
-2. Apply the Changes: Modify the original file content according to the instructions.
-3. Return the Complete Updated File: Provide the full content of the updated file, incorporating all necessary changes
-4. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
+APPLY_EDITS_PROMPT = """
+Rewrite an entire file or files using edit instructions provided by another AI.
 
-Your response must contain only the complete, updated content of the file. Do not include any explanations or additional text.
-YOU NEVER CREATE DUPLICATE CODE. MAKE SURE YOU DO NOT CREATE DUPLICATE CODE WHEN REWRITING THE NEW FILE"""
+Ensure the entire content is rewritten from top to bottom incorporating the specified changes.
+
+# Steps
+
+1. **Receive Input:** Obtain the file(s) and the edit instructions. The files can be in various formats (e.g., .txt, .docx).
+2. **Analyze Content:** Understand the content and structure of the file(s).
+3. **Review Instructions:** Carefully examine the edit instructions to comprehend the required changes.
+4. **Apply Changes:** Rewrite the entire content of the file(s) from top to bottom, incorporating the specified changes.
+5. **Verify Consistency:** Ensure that the rewritten content maintains logical consistency and cohesiveness.
+6. **Final Review:** Perform a final check to ensure all instructions were followed and the rewritten content meets the quality standards.
+7. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
 
 
+Provide the output as the FULLY NEW WRITTEN file(s).
 
+"""
+    
+    
+    
 PLANNING_PROMPT = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough."""
-
-
+    
+    
 last_ai_response = None
 conversation_history = []
 
@@ -170,7 +182,28 @@ def should_ignore(file_path, patterns):
 
 def add_file_to_context(file_path, added_files, action='to the chat context'):
     """Add a file to the given dictionary, applying exclusion rules."""
-    excluded_dirs = {'__pycache__', '.git', 'node_modules'}
+    excluded_dirs = {
+    '__pycache__',
+    '.git',
+    'node_modules',
+    'venv',
+    'env',
+    '.vscode',
+    '.idea',
+    'dist',
+    'build',
+    '__mocks__',
+    'coverage',
+    '.pytest_cache',
+    '.mypy_cache',
+    'logs',
+    'temp',
+    'tmp',
+    'secrets',
+    'private',
+    'cache',
+    'addons'
+    }
     # Removed reliance on 'excluded_extensions' and 'supported_extensions'
 
     # Load .gitignore patterns if in a git repository
@@ -424,7 +457,6 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         return None
     
 
-
 def main():
     global last_ai_response, conversation_history
 
@@ -644,6 +676,7 @@ Files to modify:
                 print(colored("o1 engineer:", "blue"))
                 rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
+
 
 
 
