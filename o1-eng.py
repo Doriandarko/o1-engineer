@@ -10,6 +10,7 @@ from prompt_toolkit.completion import WordCompleter
 from rich import print as rprint
 from rich.markdown import Markdown
 from rich.console import Console
+from rich.table import Table
 import difflib
 import re
 
@@ -131,16 +132,15 @@ Ensure the entire content is rewritten from top to bottom incorporating the spec
 6. **Final Review:** Perform a final check to ensure all instructions were followed and the rewritten content meets the quality standards.
 7. Do not include any explanations, additional text, or code block markers (such as ```html or ```).
 
-
 Provide the output as the FULLY NEW WRITTEN file(s).
+NEVER ADD ANY CODE BLOCK MARKER AT THE BEGINNING OF THE FILE OR AT THE END OF THE FILE (such as ```html or ```). 
 
 """
-    
-    
-    
+
+
 PLANNING_PROMPT = """You are an AI planning assistant. Your task is to create a detailed plan based on the user's request. Consider all aspects of the task, break it down into steps, and provide a comprehensive strategy for accomplishment. Your plan should be clear, actionable, and thorough."""
-    
-    
+
+
 last_ai_response = None
 conversation_history = []
 
@@ -271,34 +271,33 @@ def apply_modifications(new_content, file_path):
 
 def display_diff(old_content, new_content, file_path):
     diff = list(difflib.unified_diff(
-        old_content.splitlines(keepends=True),
-        new_content.splitlines(keepends=True),
-        fromfile=f"a/{file_path}",
-        tofile=f"b/{file_path}",
-        lineterm='',
-        n=5
-    ))
-    
+old_content.splitlines(keepends=True),
+new_content.splitlines(keepends=True),
+fromfile=f"a/{file_path}",
+tofile=f"b/{file_path}",
+lineterm='',
+n=5
+))
     if not diff:
         print(f"No changes detected in {file_path}")
         return
-
-    print(f"\nDiff for {file_path}:")
-
-    markdown_diff = "```diff\n"
-    for line in diff:
-        if line.startswith('+'):
-            markdown_diff += line + "\n"
-        elif line.startswith('-'):
-            markdown_diff += line + "\n"
-        elif line.startswith('^'):
-            markdown_diff += line + "\n"
-        else:
-            markdown_diff += " " + line + "\n"
-    markdown_diff += "```"
-
     console = Console()
-    console.print(Markdown(markdown_diff))
+    table = Table(title=f"Diff for {file_path}")
+    table.add_column("Status", style="bold")
+    table.add_column("Line")
+    table.add_column("Content")
+    line_number = 1
+    for line in diff:
+        status = line[0]
+        content = line[2:].rstrip()
+        if status == ' ':
+            continue  # Skip unchanged lines
+        elif status == '-':
+            table.add_row("Removed", str(line_number), content, style="red")
+        elif status == '+':
+            table.add_row("Added", str(line_number), content, style="green")
+        line_number += 1
+    console.print(table)
 
 def apply_creation_steps(creation_response, added_files, retry_count=0):
     max_retries = 3
@@ -456,6 +455,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         logging.error(f"Error while communicating with OpenAI: {e}")
         return None
     
+
 
 def main():
     global last_ai_response, conversation_history
