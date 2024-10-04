@@ -317,26 +317,35 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
                 item_type, path = info_match.groups()
                 
                 if item_type == 'FOLDER':
-                    # Create the folder
-                    os.makedirs(path, exist_ok=True)
-                    print(colored(f"Folder created: {path}", "green"))
-                    logging.info(f"Folder created: {path}")
+                    # Create the folder if it doesn't exist
+                    if not os.path.exists(path):
+                        os.makedirs(path, exist_ok=True)
+                        print(colored(f"Folder created: {path}", "green"))
+                        logging.info(f"Folder created: {path}")
+                    else:
+                        print(colored(f"Folder already exists: {path}", "yellow"))
+                        logging.info(f"Folder already exists: {path}")
                 elif item_type == 'FILE':
-                    # Extract file content (everything after the special comment line)
-                    file_content = re.sub(r'### FILE: .+\n', '', code, count=1).strip()
+                    # Create the file if it doesn't exist
+                    if not os.path.exists(path):
+                        # Extract file content (everything after the special comment line)
+                        file_content = re.sub(r'### FILE: .+\n', '', code, count=1).strip()
 
-                    # Create directories if necessary
-                    directory = os.path.dirname(path)
-                    if directory and not os.path.exists(directory):
-                        os.makedirs(directory, exist_ok=True)
-                        print(colored(f"Folder created: {directory}", "green"))
-                        logging.info(f"Folder created: {directory}")
+                        # Create directories if necessary
+                        directory = os.path.dirname(path)
+                        if directory and not os.path.exists(directory):
+                            os.makedirs(directory, exist_ok=True)
+                            print(colored(f"Folder created: {directory}", "green"))
+                            logging.info(f"Folder created: {directory}")
 
-                    # Write content to the file
-                    with open(path, 'w', encoding='utf-8') as f:
-                        f.write(file_content)
-                    print(colored(f"File created: {path}", "green"))
-                    logging.info(f"File created: {path}")
+                        # Write content to the file
+                        with open(path, 'w', encoding='utf-8') as f:
+                            f.write(file_content)
+                        print(colored(f"File created: {path}", "green"))
+                        logging.info(f"File created: {path}")
+                    else:
+                        print(colored(f"File already exists: {path}", "yellow"))
+                        logging.info(f"File already exists: {path}")
             else:
                 print(colored("Error: Could not determine the file or folder information from the code block.", "red"))
                 logging.error("Could not determine the file or folder information from the code block.")
@@ -365,6 +374,28 @@ def apply_creation_steps(creation_response, added_files, retry_count=0):
         print(colored(f"An unexpected error occurred during creation: {e}", "red"))
         logging.error(f"An unexpected error occurred during creation: {e}")
         return False
+
+    # except ValueError as e:
+    #     if retry_count < max_retries:
+    #         print(colored(f"Error: {str(e)} Retrying... (Attempt {retry_count + 1})", "red"))
+    #         logging.warning(f"Creation parsing failed: {str(e)}. Retrying... (Attempt {retry_count + 1})")
+    #         error_message = f"{str(e)} Please provide the creation instructions again using the specified format."
+    #         time.sleep(2 ** retry_count)  # Exponential backoff
+    #         new_response = chat_with_ai(error_message, is_edit_request=False, added_files=added_files)
+    #         if new_response:
+    #             return apply_creation_steps(new_response, added_files, retry_count + 1)
+    #         else:
+    #             return False
+    #     else:
+    #         print(colored(f"Failed to parse creation instructions after multiple attempts: {str(e)}", "red"))
+    #         logging.error(f"Failed to parse creation instructions after multiple attempts: {str(e)}")
+    #         print("Creation response that failed to parse:")
+    #         print(creation_response)
+    #         return False
+    # except Exception as e:
+    #     print(colored(f"An unexpected error occurred during creation: {e}", "red"))
+    #     logging.error(f"An unexpected error occurred during creation: {e}")
+    #     return False
 
 
 
