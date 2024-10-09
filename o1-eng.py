@@ -454,14 +454,9 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
         print(colored(f"Error while communicating with OpenAI: {e}", "red"))
         logging.error(f"Error while communicating with OpenAI: {e}")
         return None
-    
 
 
-def main():
-    global last_ai_response, conversation_history
-
-
-    print(colored("o1 engineer is ready to help you.", "cyan"))
+def print_help():
     print("\nAvailable commands:")
     print(f"{colored('/edit', 'magenta'):<10} {colored('Edit files or directories (followed by paths)', 'dark_grey')}")
     print(f"{colored('/create', 'magenta'):<10} {colored('Create files or folders (followed by instructions)', 'dark_grey')}")
@@ -471,6 +466,13 @@ def main():
     print(f"{colored('/review', 'magenta'):<10} {colored('Review code files (followed by file paths)', 'dark_grey')}")
     print(f"{colored('/planning', 'magenta'):<10} {colored('Generate a detailed plan based on your request', 'dark_grey')}")
     print(f"{colored('/quit', 'magenta'):<10} {colored('Exit the program', 'dark_grey')}")
+
+
+def main():
+    global last_ai_response, conversation_history
+
+    print(colored("o1 engineer is ready to help you.", "cyan"))
+    print_help()
 
     style = Style.from_dict({
         'prompt': 'cyan',
@@ -668,6 +670,12 @@ Files to modify:
             else:
                 print(colored("Failed to generate a planning response. Please try again.", "red"))
                 logging.error("AI failed to generate a planning response.")
+
+        elif user_input.startswith('/'):
+            print(colored(f'Unknown command: {user_input}', "red"))
+            print_help()
+            logging.warning('Unknown command: %s', user_input)
+            continue
 
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
