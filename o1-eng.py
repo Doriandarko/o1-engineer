@@ -400,8 +400,12 @@ def apply_edit_instructions(edit_instructions, original_files):
             modified_files[file_path] = content  # No changes for this file
     return modified_files
 
+
 def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files=None):
     global last_ai_response, conversation_history
+    if not user_message:
+        return None
+
     try:
         # Include added file contents and conversation history in the user message
         if added_files:
