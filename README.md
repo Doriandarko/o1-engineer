@@ -4,6 +4,10 @@
 
 A command-line tool designed to assist developers in managing and interacting with their projects efficiently. Leveraging the power of OpenAI's API, o1-engineer provides functionalities such as code generation, file editing, project planning, and code review to streamline your development workflow.
 
+## NEW
+
+Added Grok Engineer to the repo. Make sure you add your XAI_API_KEY in your .env file.
+
 ## 🛠️ Updated Features
 
 - **Enhanced File and Folder Management**: The `/add` and `/edit` commands now support adding and modifying both files and folders, providing greater flexibility in managing your project structure.
