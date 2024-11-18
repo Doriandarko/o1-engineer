@@ -17,7 +17,7 @@ import re
 
 MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YOUR KEY")
+client = OpenAI(api_key="YOUR OPENAI API KEY HERE")
 
 
 CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
@@ -434,13 +434,28 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
             print(colored("o1 engineer is thinking...", "magenta"))
             logging.info("Sending general query to AI.")
 
-        response = client.chat.completions.create(
+        # Create streaming response
+        stream = client.chat.completions.create(
             model=MODEL,
             messages=messages,
-            max_completion_tokens=60000
+            max_completion_tokens=60000,
+            stream=True
         )
+
+        # Initialize response content
+        response_content = ""
+        print("\no1 engineer:", end=" ")
+
+        # Process the stream
+        for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                print(content, end="", flush=True)
+                response_content += content
+
+        print()  # New line after streaming completes
         logging.info("Received response from AI.")
-        last_ai_response = response.choices[0].message.content
+        last_ai_response = response_content
 
         if not is_edit_request:
             # Update conversation history
@@ -451,7 +466,7 @@ def chat_with_ai(user_message, is_edit_request=False, retry_count=0, added_files
 
         return last_ai_response
     except Exception as e:
-        print(colored(f"Error while communicating with OpenAI: {e}", "red"))
+        print(colored(f"\nError while communicating with OpenAI: {e}", "red"))
         logging.error(f"Error while communicating with OpenAI: {e}")
         return None
     
@@ -672,9 +687,6 @@ Files to modify:
         else:
             ai_response = chat_with_ai(user_input, added_files=added_files)
             if ai_response:
-                print()
-                print(colored("o1 engineer:", "blue"))
-                rprint(Markdown(ai_response))
                 logging.info("Provided AI response to user query.")
 
 
