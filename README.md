@@ -7,6 +7,7 @@ A command-line tool designed to assist developers in managing and interacting wi
 ## NEW
 
 Added Grok Engineer to the repo. Make sure you add your XAI_API_KEY in your .env file.
+Added Streaming.
 
 ## 🛠️ Updated Features
 
