@@ -3,6 +3,7 @@ import fnmatch
 import logging
 import time
 from openai import OpenAI
+from dotenv import load_dotenv
 from termcolor import colored
 from prompt_toolkit import prompt
 from prompt_toolkit.styles import Style
@@ -15,9 +16,11 @@ import difflib
 import re
 
 
+load_dotenv()
+
 MODEL = "o1-mini"
 # Initialize OpenAI client
-client = OpenAI(api_key="YOUR OPENAI API KEY HERE")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 CREATE_SYSTEM_PROMPT = """You are an advanced o1 engineer designed to create files and folders based on user instructions. Your primary objective is to generate the content of the files to be created as code blocks. Each code block should specify whether it's a file or folder, along with its path.
